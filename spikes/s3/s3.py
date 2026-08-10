@@ -12,6 +12,12 @@ would produce a false verdict on a gate the plan calls FINAL.
 
 Also records tokens/sec with an ~8k-token canvas, per §0.7.
 
+Infrastructure checked before running (so a failure is attributable to the model,
+not the shim): mlx_lm 0.31.3 resolves Qwen3-30B-A3B-Instruct-2507's chat template
+to the `json_tools` tool parser via mlx_lm/tokenizer_utils.py:_infer_tool_parser
+(the template contains both `<tool_call>` and `tool_call.name`). mlx_lm warns and
+ignores tools when a model has no tool support, which is NOT the case here.
+
 Usage:
   .venv/bin/python s3.py --trials 10
   .venv/bin/python s3.py --trials 10 --no-think     # disable Qwen3 thinking
@@ -143,12 +149,20 @@ def score(calls: list[dict]) -> tuple[bool, str]:
             f, t = args.get("from_id"), args.get("to_id")
             if not f or not t:
                 return False, "create_arrow: missing endpoint"
-            # Endpoints must reference something real. The new shape's id is not
-            # knowable in a single turn, so accept a reference to any canvas
-            # shape or a plausible self-reference to the just-created one.
+            # The real frontend rejects unknown ids outright
+            # (web/src/canvas/execute.ts:122), so an invented id is a failure —
+            # EXCEPT that a brand-new shape's id is assigned by the browser and
+            # cannot be known in the same response. `known` therefore contains
+            # placeholders for shapes created earlier in this same response, plus
+            # whatever the canvas already had.
             for end in (f, t):
-                if end not in known and not end.startswith("shape:"):
-                    return False, f"create_arrow: endpoint {end!r} is not a shape id"
+                if end in known:
+                    continue
+                # A shape created in THIS response has no real id yet, so any
+                # unknown id is only forgiven when the model just made a shape.
+                if created and str(end).startswith("shape:"):
+                    continue
+                return False, f"create_arrow: endpoint {end!r} does not exist on the canvas"
             if f == t:
                 return False, "create_arrow: self-loop"
             made_arrow = True
@@ -236,6 +250,7 @@ def main() -> int:
     passes = 0
     reasons: list[str] = []
     latencies: list[float] = []
+    transcript: list[dict] = []
 
     for n in range(1, args.trials + 1):
         payload = {
@@ -263,6 +278,18 @@ def main() -> int:
         print(f"trial {n:2}: {'PASS' if ok else 'FAIL'}  {dt:5.1f}s  via={how:10} calls=[{names}]  {why}")
         if not ok:
             reasons.append(why)
+        transcript.append({
+            "trial": n,
+            "pass": ok,
+            "why": why,
+            "via": how,
+            "seconds": round(dt, 1),
+            "calls": calls,
+            # Keep the raw message so a failure can be diagnosed later rather
+            # than only counted.
+            "raw_message": msg,
+            "usage": resp.get("usage"),
+        })
 
     print("\n" + "=" * 60)
     print(f"SCORE: {passes}/{args.trials}")
@@ -275,6 +302,18 @@ def main() -> int:
         for r in sorted(set(reasons)):
             print(f"  - {r}  (x{reasons.count(r)})")
     print("=" * 60)
+
+    out = pathlib.Path(__file__).parent / "last_run.json"
+    out.write_text(json.dumps({
+        "score": passes,
+        "trials": args.trials,
+        "gate": 8,
+        "verdict": "pass" if passes >= 8 else "fail",
+        "temperature": args.temp,
+        "thinking": not args.no_think,
+        "trials_detail": transcript,
+    }, indent=2) + "\n")
+    print(f"\nfull transcript: {out}")
 
     if not args.skip_probe:
         big_canvas_probe(tools, system)
