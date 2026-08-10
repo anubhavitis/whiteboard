@@ -45,38 +45,60 @@ flowchart TB
         mcp["claudecode/mcp<br/>/mcp/{sessionID}"]
     end
 
-    cc["claude -p<br/>subprocess"]
+    subgraph agents["agents (separate processes)"]
+        cc["claude -p subprocess<br/><i>owns its own loop</i>"]
+        mlx["mlx_lm.server + Qwen3<br/><i>planned — inference only,<br/>Go owns the loop</i>"]
+    end
 
-    chat -- "① user_message<br/>+ canvas JSON" --> handler
-    handler -- "②" --> cc
-    cc -- "③" --> handler
-    handler -- "④ text" --> chat
+    chat -- "user_message<br/>+ canvas JSON" --> handler
+    handler -- "SendTurn<br/>(stdin, stream-json)" --> cc
+    cc -- "assistant_delta" --> handler
 
-    cc -- "⑤" --> mcp
-    mcp -- "⑥" --> executor
-    executor -- "⑦ tool_call" --> canvas
-    canvas -- "⑧ tool_result<br/>+ shape ids" --> executor
-    executor -- "⑨" --> mcp
-    mcp -- "⑩" --> cc
+    cc -- "JSON-RPC<br/>POST /mcp/{id}" --> mcp
+    mcp -- "ToolExecutor" --> executor
+    executor -- "tool_call" --> canvas
+    canvas -- "tool_result<br/>+ shape ids" --> executor
 
-    linkStyle 0,1,2,3 stroke:#64748b,stroke-width:2px
-    linkStyle 4,5,6,7,8,9 stroke:#8b5cf6,stroke-width:2px
+    handler -. "SendTurn<br/>(OpenAI-compatible HTTP)" .-> mlx
+    mlx -. "streamed text —<br/>tool calls parsed out here" .-> executor
+
+    linkStyle 0,1,2 stroke:#64748b,stroke-width:2px
+    linkStyle 3,4,5,6 stroke:#8b5cf6,stroke-width:2px
+    linkStyle 7,8 stroke:#94a3b8,stroke-width:2px,stroke-dasharray:4 4
 ```
 
-Grey is the chat path, violet the drawing path.
+Grey is the chat path, violet the drawing path, dashed the planned local-model path. Results travel
+back the way they came: a shape id returns through `ws/executor` to the MCP response, and the agent's
+text streams out to the chat panel as it arrives.
 
-| Step | What crosses |
-| --- | --- |
-| ② | `SendTurn` — written to the subprocess stdin as `stream-json` |
-| ③ | `assistant_delta` frames, streamed back as the agent talks |
-| ⑤ ⑩ | JSON-RPC over HTTP POST to `/mcp/{sessionID}` — how a subprocess calls back in |
-| ⑥ ⑨ | in-process `agent.ToolExecutor` call, looked up by session id |
+### Two agents, one interface
 
-Steps ⑤–⑩ repeat for each tool the agent calls, and it chains returned shape ids into later calls
-(that is how `create_arrow` knows what to connect). Two properties of this loop are load-bearing:
+The dashed path is the second agent, and it is the reason `agent.AgentSession` is shaped the way it
+is. The two agents put the loop on **opposite sides of the process boundary**:
 
-- **⑤–⑩ blocks the whole time.** The tool call waits on the browser, and the reply can only arrive
-  through the socket read loop — so turns are forwarded on their own goroutine. Handling them
+| | Claude Code (built) | MLX / Qwen3 (planned) |
+| --- | --- | --- |
+| Who owns the loop | Claude Code itself | our Go code |
+| How tool calls arrive | pushed *in* over MCP | parsed *out of* the streamed response |
+| Transport | subprocess stdio + HTTP callback | OpenAI-compatible HTTP to `mlx_lm.server` |
+| Auth | your Claude Code subscription | none — runs on your machine |
+
+That is why the seam sits *above* the loop rather than at the model-API level: an interface at the
+API level could not span both. Both implementations reach the canvas through the same
+`agent.ToolExecutor`, so the browser-executes-tools half of the diagram is unchanged either way —
+only the left edge differs. Nothing outside the two agent implementations may import
+`anthropic`/`openai`/`mcp`/`exec` packages; that single import rule is what keeps this swappable.
+
+**Status: unproven.** The local agent is not built, and whether it gets tools *at all* is gated on a
+spike that has not run yet (Qwen3 must produce valid tool calls in ≥8/10 trials). Below that bar it
+stays chat- and critique-only — useful, but it would not drive the violet path. Treat the dashed
+edges as intent, not as description.
+
+The violet loop repeats for each tool the agent calls, chaining returned shape ids into later calls —
+that is how `create_arrow` knows what to connect. Two properties of it are load-bearing:
+
+- **The tool call blocks the whole way round.** It waits on the browser, and the reply can only
+  arrive through the socket read loop — so turns are forwarded on their own goroutine. Handling them
   synchronously deadlocks every drawing turn; `TestToolCallRoundTripDoesNotDeadlock` keeps it fixed.
   The round-trip is bounded by a 30s timeout, so a closed tab fails the call instead of wedging the
   session.
@@ -119,8 +141,8 @@ Requires the `claude` CLI on PATH, logged in. No API key.
 ## Known limits
 
 - **Turns take ~10–30s.** Claude Code is optimised for depth, not chat latency. Fine for "critique
-  this architecture", sluggish for rapid back-and-forth. A local model (planv2 §4.2) is the fix and
-  is not built yet.
+  this architecture", sluggish for rapid back-and-forth. The local MLX agent above is the intended
+  fix and is not built yet.
 - **Usage is shared with your normal Claude Code work** — same subscription window. Config isolation
   keeps a turn ~6x cheaper than the naive setup; see `spikes/FINDINGS.md`.
 - **The `claude` CLI is a moving dependency.** After upgrading it, re-run the spikes in `spikes/`
