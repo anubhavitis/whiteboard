@@ -19,12 +19,12 @@
   <g stroke="#cbd5e1" stroke-dasharray="5 4" fill="#f8fafc">
     <rect x="24"  y="70" width="250" height="300" rx="8"/>
     <rect x="375" y="70" width="250" height="425" rx="8"/>
-    <rect x="726" y="70" width="250" height="300" rx="8"/>
+    <rect x="726" y="70" width="250" height="376" rx="8"/>
   </g>
   <g font-size="12" font-weight="600" fill="#64748b" text-anchor="middle">
     <text x="149" y="90">browser</text>
     <text x="500" y="90">Go server :8787</text>
-    <text x="851" y="90">agents · separate processes</text>
+    <text x="851" y="90">agents · one per process</text>
   </g>
 
   <!-- ============ nodes ============ -->
@@ -35,7 +35,15 @@
     <rect x="405" y="286" width="190" height="60" rx="6" fill="#f5f3ff" stroke="#7c3aed"/>
     <rect x="405" y="408" width="190" height="60" rx="6" fill="#f5f3ff" stroke="#7c3aed"/>
     <rect x="756" y="112" width="190" height="60" rx="6" fill="#eef2ff" stroke="#6366f1"/>
-    <rect x="756" y="286" width="190" height="70" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-dasharray="5 4"/>
+    <rect x="756" y="286" width="190" height="70" rx="6" fill="#eef2ff" stroke="#6366f1"/>
+    <rect x="756" y="386" width="190" height="40" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+  </g>
+
+  <!-- Exactly one agent is live per process: WHITEBOARD_AGENT picks it at
+       startup, so these are alternatives, not peers running side by side. -->
+  <g font-size="11" font-weight="600" fill="#94a3b8" text-anchor="middle">
+    <text x="851" y="196">— or —</text>
+    <text x="851" y="376">— or —</text>
   </g>
 
   <g font-size="13.5" fill="#0f172a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
@@ -46,6 +54,7 @@
     <text x="500" y="433">claudecode/mcp</text>
     <text x="851" y="136">claude -p</text>
     <text x="851" y="311">mlx_lm.server + Qwen3</text>
+    <text x="851" y="405" font-size="12">echo</text>
   </g>
   <g font-size="11" fill="#64748b" text-anchor="middle">
     <text x="149" y="330">tldraw store — owns canvas state</text>
@@ -53,6 +62,7 @@
     <text x="851" y="154">owns its own loop</text>
     <text x="851" y="329">chat works · inference only,</text>
     <text x="851" y="344">Go owns the loop</text>
+    <text x="851" y="419">fallback · no model needed</text>
   </g>
 
   <!-- ============ chat path (grey) ============ -->
@@ -88,28 +98,38 @@
     <text x="327" y="357">tool_result + shape ids</text>
   </g>
 
-  <!-- ============ planned MLX path (dashed) ============ -->
-  <g stroke="#94a3b8" stroke-width="1.75" fill="none" stroke-dasharray="6 4" marker-end="url(#a-dash)">
-    <path d="M560,158 L560,190 L690,190 L690,300 L752,300"/>
-    <path d="M752,336 L668,336 L668,326 L599,326"/>
+  <!-- ============ local-model path ============ -->
+  <!-- Solid grey: built and verified. The request goes out and the SSE reply
+       streams back to ws/handler, which is all internal/native does today. -->
+  <g stroke="#64748b" stroke-width="1.75" fill="none" marker-end="url(#a-grey)">
+    <path d="M566,158 L566,212 L706,212 L706,296 L752,296"/>
+    <path d="M752,322 L688,322 L688,232 L548,232 L548,162"/>
   </g>
-  <g font-size="11" fill="#64748b">
-    <text x="700" y="212">SendTurn over</text>
-    <text x="700" y="226">OpenAI-compatible HTTP</text>
+  <g font-size="11" fill="#334155">
+    <text x="718" y="256">POST /v1/chat/completions</text>
+    <text x="718" y="270">SSE deltas stream back</text>
   </g>
-  <g font-size="11" fill="#64748b" text-anchor="end">
-    <text x="660" y="357">tool calls parsed</text>
-    <text x="660" y="371">out of the stream —</text>
-    <text x="660" y="385">not built yet</text>
+
+  <!-- Dashed and deliberately stopping short of ws/executor: nothing parses
+       tool calls out of the local stream yet, and native.Factory.New discards
+       the ToolExecutor it is handed (internal/native/factory.go). -->
+  <!-- Stops in open space on purpose: this edge does not exist in the code. -->
+  <g stroke="#cbd5e1" stroke-width="1.75" fill="none" stroke-dasharray="6 4">
+    <path d="M598,340 L660,340"/>
+  </g>
+  <circle cx="663" cy="340" r="2.5" fill="#cbd5e1"/>
+  <g font-size="10.5" fill="#94a3b8">
+    <text x="600" y="362">tool calls out of the</text>
+    <text x="600" y="375">stream — NOT BUILT</text>
   </g>
 
   <!-- ============ legend ============ -->
   <g transform="translate(24,524)" font-size="11.5">
     <line x1="0" y1="0" x2="26" y2="0" stroke="#475569" stroke-width="2"/>
-    <text x="34" y="4" fill="#334155">chat path</text>
-    <line x1="110" y1="0" x2="136" y2="0" stroke="#7c3aed" stroke-width="2"/>
-    <text x="144" y="4" fill="#334155">drawing path — the browser executes every tool</text>
-    <line x1="452" y1="0" x2="478" y2="0" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4"/>
-    <text x="486" y="4" fill="#334155">local-model path — chat works; tool loop not built (S3 passed 10/10)</text>
+    <text x="34" y="4" fill="#334155">chat — built</text>
+    <line x1="128" y1="0" x2="154" y2="0" stroke="#7c3aed" stroke-width="2"/>
+    <text x="162" y="4" fill="#334155">drawing — built; the browser executes every tool</text>
+    <line x1="470" y1="0" x2="496" y2="0" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="504" y="4" fill="#334155">not built — S3 passed 10/10, so this is next</text>
   </g>
 </svg>
