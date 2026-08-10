@@ -32,40 +32,9 @@ The agent's loop runs *inside* Claude Code, not in the Go server. Tool calls arr
 process over MCP, and the browser — not the backend — applies them to the canvas (D5), so the tldraw
 store stays the single owner of canvas state and undo/redo works for free.
 
-```mermaid
-flowchart TB
-    subgraph browser["browser"]
-        chat["useAgentSocket"]
-        canvas["canvas/execute<br/>(tldraw store)"]
-    end
-
-    subgraph server["Go server :8787"]
-        handler["ws/handler"]
-        executor["ws/executor"]
-        mcp["claudecode/mcp<br/>/mcp/{sessionID}"]
-    end
-
-    subgraph agents["agents (separate processes)"]
-        cc["claude -p subprocess<br/><i>owns its own loop</i>"]
-        mlx["mlx_lm.server + Qwen3<br/><i>planned — inference only,<br/>Go owns the loop</i>"]
-    end
-
-    chat -- "user_message<br/>+ canvas JSON" --> handler
-    handler -- "SendTurn<br/>(stdin, stream-json)" --> cc
-    cc -- "assistant_delta" --> handler
-
-    cc -- "JSON-RPC<br/>POST /mcp/{id}" --> mcp
-    mcp -- "ToolExecutor" --> executor
-    executor -- "tool_call" --> canvas
-    canvas -- "tool_result<br/>+ shape ids" --> executor
-
-    handler -. "SendTurn<br/>(OpenAI-compatible HTTP)" .-> mlx
-    mlx -. "streamed text —<br/>tool calls parsed out here" .-> executor
-
-    linkStyle 0,1,2 stroke:#64748b,stroke-width:2px
-    linkStyle 3,4,5,6 stroke:#8b5cf6,stroke-width:2px
-    linkStyle 7,8 stroke:#94a3b8,stroke-width:2px,stroke-dasharray:4 4
-```
+<p align="center">
+  <img src="docs/turn-flow.svg" alt="A turn flows from the browser to ws/handler, out to the claude -p subprocess, then back in over MCP to ws/executor, which asks the browser to execute each canvas tool. A dashed path shows the planned local MLX model." width="100%">
+</p>
 
 Grey is the chat path, violet the drawing path, dashed the planned local-model path. Results travel
 back the way they came: a shape id returns through `ws/executor` to the MCP response, and the agent's
@@ -123,6 +92,7 @@ green connected, red disconnected.
 | `web/` | Vite + React + tldraw. Owns the canvas and executes agent tools. |
 | `server/` | Go. Owns the model loop and the WebSocket session. |
 | `spikes/` | Feasibility spikes + `FINDINGS.md`; re-run after a `claude` upgrade. |
+| `docs/turn-flow.svg` | The dataflow diagram above, hand-authored. Edit it when the protocol changes. |
 
 The build plan (`planv2.md`) and the decision log (`DECISIONS.md`, D1–D7) are kept local and are not
 published here; references to `D2`/`D5`/`planv2 §4.2` below point at those.
