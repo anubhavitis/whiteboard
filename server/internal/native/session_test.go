@@ -264,6 +264,73 @@ func TestSkipsUnparseableChunks(t *testing.T) {
 	}
 }
 
+// Thinking models stream chain-of-thought in delta.reasoning, not delta.content
+// (mlx_lm.server 0.31.3). Reasoning must never reach the UI or the history.
+func TestReasoningDeltasAreNotShownAsText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fl := w.(http.Flusher)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning\":\"Okay, the user wants\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning\":\" a database.\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Added it.\"}}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		fl.Flush()
+	}))
+	defer srv.Close()
+
+	f := NewFactory(srv.URL+"/v1", "m", "SYS", quietLog())
+	s, _ := f.New(context.Background(), "sess", nil)
+	defer s.Close()
+
+	if err := s.SendTurn(context.Background(), "hi", nil); err != nil {
+		t.Fatal(err)
+	}
+	got, sawErr := collect(t, s)
+	if sawErr {
+		t.Error("unexpected error event")
+	}
+	if got != "Added it." {
+		t.Errorf("text = %q, want only the content delta %q", got, "Added it.")
+	}
+	if strings.Contains(got, "Okay") {
+		t.Error("chain-of-thought leaked into the assistant text")
+	}
+}
+
+// A model that thinks until it runs out of budget must not present as an empty
+// reply: errors surface, never swallowed.
+func TestReasoningWithNoContentSurfacesAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fl := w.(http.Flusher)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning\":\"thinking forever\"}}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		fl.Flush()
+	}))
+	defer srv.Close()
+
+	f := NewFactory(srv.URL+"/v1", "m", "SYS", quietLog())
+	s, _ := f.New(context.Background(), "sess", nil)
+	defer s.Close()
+
+	if err := s.SendTurn(context.Background(), "hi", nil); err != nil {
+		t.Fatal(err)
+	}
+	got, sawErr := collect(t, s)
+	if got != "" {
+		t.Errorf("text = %q, want empty", got)
+	}
+	if !sawErr {
+		t.Error("a thinking-only response must be reported, not shown as silence")
+	}
+}
+
+// mlx_lm.server resolves `model` against the HF Hub, so a friendly alias 404s.
+func TestDefaultModelIsARealRepoID(t *testing.T) {
+	f := NewFactory("", "", "SYS", quietLog())
+	if !strings.Contains(f.Model, "/") {
+		t.Errorf("Model = %q; mlx_lm.server needs a repo id like org/name, not an alias", f.Model)
+	}
+}
+
 func TestFactoryNameIsStableForTheDropdown(t *testing.T) {
 	if got := NewFactory("", "", "", quietLog()).Name(); got != "local" {
 		t.Errorf("Name() = %q, want %q", got, "local")

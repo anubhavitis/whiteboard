@@ -110,6 +110,6 @@
     <line x1="110" y1="0" x2="136" y2="0" stroke="#7c3aed" stroke-width="2"/>
     <text x="144" y="4" fill="#334155">drawing path — the browser executes every tool</text>
     <line x1="452" y1="0" x2="478" y2="0" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4"/>
-    <text x="486" y="4" fill="#334155">local-model path — chat works; drawing gated on spike S3</text>
+    <text x="486" y="4" fill="#334155">local-model path — chat works; tool loop not built (S3 passed 10/10)</text>
   </g>
 </svg>

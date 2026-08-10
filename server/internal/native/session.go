@@ -151,6 +151,9 @@ func (s *Session) stream(ctx context.Context, convo []message) (string, error) {
 	}
 
 	var full strings.Builder
+	// sawReasoning distinguishes "the model said nothing" from "the model spent
+	// its whole budget thinking", which are different problems for the user.
+	sawReasoning := false
 	sc := bufio.NewScanner(resp.Body)
 	// SSE lines can exceed bufio's default 64k on long single-chunk replies.
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -169,6 +172,12 @@ func (s *Session) stream(ctx context.Context, convo []message) (string, error) {
 			Choices []struct {
 				Delta struct {
 					Content string `json:"content"`
+					// Qwen3 and other thinking models stream their chain of
+					// thought here, NOT in content — verified against
+					// mlx_lm.server 0.31.3, which emits {"delta":{"reasoning":
+					// "..."}} frames before any content arrives. Reading only
+					// content leaves the UI frozen for the whole thinking phase.
+					Reasoning string `json:"reasoning"`
 				} `json:"delta"`
 			} `json:"choices"`
 		}
@@ -178,6 +187,12 @@ func (s *Session) stream(ctx context.Context, convo []message) (string, error) {
 			continue
 		}
 		for _, c := range chunk.Choices {
+			// Thinking is not shown as assistant text and never enters history:
+			// it is the model's scratchpad, and replaying it next turn would
+			// both confuse the model and burn context.
+			if c.Delta.Reasoning != "" {
+				sawReasoning = true
+			}
 			if c.Delta.Content == "" {
 				continue
 			}
@@ -188,6 +203,14 @@ func (s *Session) stream(ctx context.Context, convo []message) (string, error) {
 	if err := sc.Err(); err != nil {
 		// Return what we have: a truncated reply already reached the UI.
 		return full.String(), err
+	}
+	if full.Len() == 0 && sawReasoning {
+		// The model thought until it ran out of budget and never spoke. Saying
+		// so beats an empty bubble the user cannot interpret.
+		s.emit(agent.AgentEvent{
+			Type: agent.EventError,
+			Text: "the local model spent its whole response thinking and never answered — try a shorter question, or a model with thinking disabled",
+		})
 	}
 	return full.String(), nil
 }

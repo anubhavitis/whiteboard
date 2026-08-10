@@ -28,13 +28,21 @@ type Factory struct {
 	Timeout time.Duration
 }
 
+// DefaultModel is the model mlx_lm.server is expected to be serving.
+//
+// This must be a real HuggingFace repo id, NOT a friendly alias: mlx_lm.server
+// resolves whatever `model` it is sent against the Hub, so "local" produces a
+// 404 with a "Repository Not Found for url: .../models/local" body rather than
+// falling back to the loaded model. Verified against mlx_lm 0.31.3.
+const DefaultModel = "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit"
+
 // NewFactory builds a Factory with defaults filled in.
 func NewFactory(baseURL, model, prompt string, log *slog.Logger) *Factory {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
 	if model == "" {
-		model = "local"
+		model = DefaultModel
 	}
 	return &Factory{BaseURL: baseURL, Model: model, Prompt: prompt, Log: log, Timeout: 5 * time.Minute}
 }

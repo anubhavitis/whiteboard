@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import statistics
@@ -37,7 +38,12 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "server/internal/agent/testdata/openai_tools.json"
-BASE = "http://127.0.0.1:8080/v1/chat/completions"
+BASE = os.environ.get("S3_BASE", "http://127.0.0.1:8080") + "/v1/chat/completions"
+
+# mlx_lm.server resolves `model` against the HF Hub rather than falling back to
+# whatever it loaded, so this must be the real repo id being served. "local"
+# returns 404 with "Repository Not Found for url: .../models/local".
+MODEL = os.environ.get("S3_MODEL", "mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit")
 
 # A small canvas the model must position against. Ids are opaque on purpose:
 # the model has to copy them, which is where weaker models fail.
@@ -49,6 +55,29 @@ CANVAS = {
     "arrows": [{"from": "shape:api7Kq", "to": "shape:authX2"}],
     "selected": [],
 }
+
+# Opaque ids that differ per trial. Reusing one canvas lets a model "pass" by
+# reproducing an id it saw in an earlier identical prompt; fresh ids each trial
+# force it to actually copy from the canvas it was given.
+ID_PAIRS = [
+    ("shape:api7Kq", "shape:authX2"), ("shape:gw3Lm", "shape:idp9Zt"),
+    ("shape:edge4Rb", "shape:sso2Wn"), ("shape:front8Ky", "shape:oauth5Qd"),
+    ("shape:ingr6Pv", "shape:token1Hs"), ("shape:apiB2x", "shape:authC7j"),
+    ("shape:rtr9Fd", "shape:sess3Mk"), ("shape:prox5Ta", "shape:cred8Yn"),
+    ("shape:lb7Wq", "shape:login4Vz"), ("shape:mesh1Nc", "shape:iam6Gb"),
+]
+
+
+def canvas_for(trial: int) -> dict:
+    gw, auth = ID_PAIRS[(trial - 1) % len(ID_PAIRS)]
+    return {
+        "shapes": [
+            {"id": gw, "type": "box", "text": "API Gateway", "x": 0, "y": 0, "w": 160, "h": 80},
+            {"id": auth, "type": "box", "text": "Auth Service", "x": 0, "y": 200, "w": 160, "h": 80},
+        ],
+        "arrows": [{"from": gw, "to": auth}],
+        "selected": [],
+    }
 
 TASK = (
     "Add a Postgres database below the Auth Service and connect the Auth Service to it."
@@ -109,12 +138,13 @@ DIRECTIONS = {"above", "below", "left_of", "right_of"}
 SHAPES = {"box", "ellipse", "text"}
 
 
-def score(calls: list[dict]) -> tuple[bool, str]:
+def score(calls: list[dict], canvas: dict | None = None) -> tuple[bool, str]:
     """Did the model actually accomplish 'add a box and connect it'?"""
     if not calls:
         return False, "no tool calls"
 
-    known = {s["id"] for s in CANVAS["shapes"]}
+    canvas = canvas or CANVAS
+    known = {sh["id"] for sh in canvas["shapes"]}
     created: list[str] = []
     made_shape = False
     made_arrow = False
@@ -174,8 +204,30 @@ def score(calls: list[dict]) -> tuple[bool, str]:
     return True, "ok"
 
 
-def build_messages(system: str, think: bool) -> list[dict]:
-    user = json.dumps({"canvas": CANVAS, "message": TASK})
+# Ten paraphrases of the same task. Re-sending ONE prompt ten times does not
+# produce ten samples: mlx_lm.server prompt-caches, so trials 2..10 came back
+# byte-identical with cached_tokens=1305/1306 and the same 89 completion tokens.
+# That scores a single response ten times. Varying the wording (and the canvas
+# ids below) defeats the cache and tests the capability rather than the cache.
+TASK_VARIANTS = [
+    "Add a Postgres database below the Auth Service and connect the Auth Service to it.",
+    "Put a Postgres box under Auth Service, and draw an arrow from Auth Service into it.",
+    "We need a database. Add Postgres beneath the auth service and wire them together.",
+    "Create a Postgres store below Auth Service; connect auth to the store.",
+    "Sketch a Postgres node under the Auth Service and link Auth Service to it.",
+    "Add persistence: a Postgres box below Auth Service, arrow from Auth Service.",
+    "Drop a Postgres database below the auth box and join them with an arrow.",
+    "Auth Service needs a Postgres DB below it — add it and connect the two.",
+    "Below Auth Service add a box labelled Postgres, then arrow Auth Service to it.",
+    "Give the Auth Service a Postgres database underneath, connected to it.",
+]
+
+
+def build_messages(system: str, think: bool, trial: int) -> list[dict]:
+    """One turn. `trial` selects a paraphrase so the prompt cache cannot serve
+    the same completion for every sample."""
+    task = TASK_VARIANTS[(trial - 1) % len(TASK_VARIANTS)]
+    user = json.dumps({"canvas": canvas_for(trial), "message": task})
     sys_prompt = system if think else system + "\n\n/no_think"
     return [
         {"role": "system", "content": sys_prompt},
@@ -209,7 +261,7 @@ def big_canvas_probe(tools, system) -> None:
         {"from": f"shape:n{i:04d}", "to": f"shape:n{i+1:04d}"} for i in range(n - 1)
     ]
     payload = {
-        "model": "local",
+        "model": MODEL,
         "messages": [
             {"role": "system", "content": system},
             {
@@ -262,11 +314,12 @@ def main() -> int:
     reasons: list[str] = []
     latencies: list[float] = []
     transcript: list[dict] = []
+    transport_failures = 0
 
     for n in range(1, args.trials + 1):
         payload = {
-            "model": "local",
-            "messages": build_messages(system, not args.no_think),
+            "model": MODEL,
+            "messages": build_messages(system, not args.no_think, n),
             "tools": tools,
             "temperature": args.temp,
             "max_tokens": 2048,
@@ -275,15 +328,21 @@ def main() -> int:
         try:
             resp = post(payload)
         except (urllib.error.URLError, TimeoutError) as e:
-            print(f"trial {n:2}: TRANSPORT FAIL {e}")
-            reasons.append(f"transport: {e}")
+            detail = ""
+            if isinstance(e, urllib.error.HTTPError):
+                try:
+                    detail = " | " + e.read().decode()[:200]
+                except Exception:
+                    pass
+            print(f"trial {n:2}: TRANSPORT FAIL {e}{detail}")
+            transport_failures += 1
             continue
         dt = time.time() - t0
         latencies.append(dt)
 
         msg = (resp.get("choices") or [{}])[0].get("message") or {}
         calls, how = extract_calls(msg)
-        ok, why = score(calls)
+        ok, why = score(calls, canvas_for(n))
         passes += ok
         names = ",".join(str(c.get("name")) for c in calls) or "-"
         print(f"trial {n:2}: {'PASS' if ok else 'FAIL'}  {dt:5.1f}s  via={how:10} calls=[{names}]  {why}")
@@ -306,8 +365,20 @@ def main() -> int:
     print(f"SCORE: {passes}/{args.trials}")
     if latencies:
         print(f"latency: median {statistics.median(latencies):.1f}s  max {max(latencies):.1f}s")
-    verdict = "PASS -> local agent gets tools" if passes >= 8 else "FAIL -> local agent is chat/critique-only (planv2 0.7: FINAL)"
-    print(f"VERDICT: {verdict}")
+
+    # A transport failure says nothing about the model. Reporting one as a FAIL
+    # would write a verdict planv2 0.7 calls FINAL on the basis of a bad URL or a
+    # wrong model name, so refuse to produce a verdict at all.
+    if transport_failures:
+        print(f"TRANSPORT FAILURES: {transport_failures}/{args.trials}")
+        print("VERDICT: NONE — the endpoint did not answer, so this run says "
+              "nothing about the model. Fix the transport and re-run.")
+        verdict = "inconclusive"
+    else:
+        verdict = "pass" if passes >= 8 else "fail"
+        human = ("PASS -> local agent gets tools" if passes >= 8 else
+                 "FAIL -> local agent is chat/critique-only (planv2 0.7: FINAL)")
+        print(f"VERDICT: {human}")
     if reasons:
         print("\nfailure modes:")
         for r in sorted(set(reasons)):
@@ -319,7 +390,8 @@ def main() -> int:
         "score": passes,
         "trials": args.trials,
         "gate": 8,
-        "verdict": "pass" if passes >= 8 else "fail",
+        "verdict": verdict,
+        "transport_failures": transport_failures,
         "temperature": args.temp,
         "thinking": not args.no_think,
         "trials_detail": transcript,

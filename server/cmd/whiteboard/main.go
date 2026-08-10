@@ -73,7 +73,7 @@ func pickAgent(choice string, mcp *claudecode.MCPServer, mcpBase string, log *sl
 	localFactory := func() agent.Factory {
 		f := native.NewFactory(
 			env("WHITEBOARD_LOCAL_BASE_URL", native.DefaultBaseURL),
-			env("WHITEBOARD_LOCAL_MODEL", "local"),
+			env("WHITEBOARD_LOCAL_MODEL", native.DefaultModel),
 			agent.SystemPrompt, log)
 		log.Info("using local agent", "base_url", f.BaseURL, "model", f.Model,
 			"note", "chat-only until spike S3 (planv2.md 0.7) says otherwise")

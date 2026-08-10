@@ -52,7 +52,7 @@ is. The two agents put the loop on **opposite sides of the process boundary**:
 | Transport | subprocess stdio + HTTP callback | OpenAI-compatible HTTP to `mlx_lm.server` |
 | Auth | your Claude Code subscription | none — runs on your machine |
 | Multi-turn memory | the subprocess, via `--resume` | ours: the endpoint is stateless |
-| Status | reads and draws | reads and answers; drawing gated on S3 |
+| Status | reads and draws | reads and answers; tool loop not built (S3 passed 10/10) |
 
 That is why the seam sits *above* the loop rather than at the model-API level: an interface at the
 API level could not span both. Both implementations reach the canvas through the same
@@ -61,10 +61,15 @@ only the left edge differs. Nothing outside the two agent implementations may im
 `anthropic`/`openai`/`mcp`/`exec` packages; that single import rule is what keeps this swappable.
 
 **Status.** The chat half of the local agent is built and verified end to end against an
-OpenAI-compatible endpoint. The drawing half is not: whether the local model gets tools *at all* is
-gated on spike S3, which requires Qwen3 to produce valid tool calls in ≥8/10 trials. Below that bar it
-stays chat- and critique-only, and would never drive the violet path. `spikes/s3/` holds the harness;
-it scores against the same schemas the real agents use, dumped from Go rather than retyped.
+OpenAI-compatible endpoint. The drawing half is not built, but it is no longer in question: spike S3
+scored **Qwen3-30B-A3B-Instruct-2507 at 10/10** on "add a box and connect it" against the real tool
+schemas, median 1.5s per tool call, so the local model has earned canvas tools. Building the native
+tool loop is the next step, not a gamble.
+
+The number is worth one caveat, recorded in `spikes/FINDINGS.md`: the first 10/10 was a single
+response scored ten times, because an identical prompt hits `mlx_lm.server`'s prompt cache
+(`cached_tokens` 1305 of 1306, byte-identical output). The honest run varies the wording and the canvas
+ids per trial and still scores 10/10, with ten distinct responses.
 
 The violet loop repeats for each tool the agent calls, chaining returned shape ids into later calls —
 that is how `create_arrow` knows what to connect. Two properties of it are load-bearing:

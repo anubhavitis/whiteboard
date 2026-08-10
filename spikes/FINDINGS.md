@@ -116,16 +116,60 @@ was accepted.
 
 ---
 
-## S3 — Qwen3 tool calling · deferred
+## S3 — Qwen3 tool calling · PASS 10/10
 
-Requires `mlx-lm` and a ~17GB model pull; deferred on bandwidth grounds
-(user decision, this session). Until it runs, **D6 is decided by S1/S2 alone**
-and the native agent slot stays wired but empty.
+Ran 2026-08-10. **Verdict: pass — the local agent gets tools** (`planv2.md` §0.7
+gate is ≥8/10). Harness: `spikes/s3/s3.py`, transcript in `spikes/s3/last_run.json`.
 
-Consequence to accept knowingly: with no local agent, every whiteboard turn
-draws on the same subscription window as real work. `planv2.md` §4.2
-(local default, escalate to Claude) is the mitigation and is currently
-unavailable.
+| | |
+| --- | --- |
+| Model | `mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit` (32.4GB, 8bit) |
+| Server | `mlx_lm.server` 0.31.3, Python 3.14, Metal |
+| Score | 10/10, ten distinct prompts and ten distinct canvases |
+| Tool-call latency | median 1.5s, max 1.9s |
+| 8k-canvas turn | 2.9s wall, 9,062 prompt tokens server-reported |
+
+Chose **8bit, not 4bit**: quantization degrades structured output first, and that
+is exactly what this gate measures. A false FAIL on a verdict the plan calls FINAL
+was the risk worth 32GB.
+
+Three things this spike got wrong before it got it right, all worth keeping:
+
+**1. The first 10/10 was one sample scored ten times.** Re-sending an identical
+prompt hit `mlx_lm.server`'s prompt cache: `cached_tokens` 1305 of 1306, byte-identical
+tool calls, `completion_tokens=89` on every trial. Temperature 0.7 did not save it.
+The harness now varies both the wording (`TASK_VARIANTS`) and the canvas ids
+(`ID_PAIRS`) per trial; the honest run produces 10 distinct responses, each copying
+its own trial's ids — proof the model reads the canvas rather than replaying.
+
+**2. A transport error reported itself as a model verdict.** With the wrong `model`
+name every trial 404'd and the harness printed
+`VERDICT: FAIL -> chat/critique-only (FINAL)`. A bad URL could have written off local
+tool support permanently. Transport failures now yield `VERDICT: NONE`.
+
+**3. `model` must be a real HF repo id.** `mlx_lm.server` resolves it against the
+Hub instead of falling back to what it loaded, so `"local"` 404s with
+`Repository Not Found for url: .../models/local`. This was also a live bug in
+`internal/native` — see `DefaultModel`.
+
+Infrastructure verified before trusting the score, so the result is attributable to
+the model: this model's chat template contains `<tool_call>` and `tool_call.name`, so
+`mlx_lm/tokenizer_utils.py:_infer_tool_parser` selects the `json_tools` parser. A
+model with no tool support gets a warning and its tools silently dropped
+(`server.py:537`); that is not this case.
+
+One caveat on what "pass" means. The model cannot know a new shape's real id in the
+same response — the browser assigns it — so it invents a placeholder (`shape:2d8kL`)
+for the arrow's far end. Real chaining goes through `tool_result`, exactly as the
+Claude Code agent does. Ten of ten got the *canvas-resident* id right, which is the
+part that has to be copied; the placeholder half stays unproven until the native
+tool loop exists.
+
+Also measured, and it corrects an assumption in this file's own probe: canvas JSON
+tokenizes far worse than prose. 260 shapes is **20,891 tokens**, not the ~9.5k a
+`len()/4` estimate suggests — off by 2.2x, because of quoted keys and `shape:` ids.
+100 shapes is 7,915 tokens, and that is the ~8k fixture now. The §5.3 canvas-diffing
+work is not urgent at 8k (2.9s), but a 300-shape brainstorm is a 20k-token prompt.
 
 ---
 
@@ -139,4 +183,8 @@ The S1 run reported:
 
 The five-hour window is already at its overage boundary. At the isolated
 $0.0387/turn this is workable for real sessions; at the bare $0.2271 it is not.
-This is the strongest argument for finishing S3 when bandwidth allows.
+This was the strongest argument for finishing S3, which has now passed: a local
+agent that costs nothing per turn is available, so `planv2.md` §4.2 (local by
+default, escalate to Claude Code) is unblocked. The local agent is chat-only until
+the native tool loop is built — the S3 verdict says it *may* have tools, not that
+it has them yet.
