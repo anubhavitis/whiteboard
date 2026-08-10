@@ -7,7 +7,7 @@ can read what you've drawn and draw back.
 
 ## Status
 
-Phases 0–2 of `planv2.md` complete and verified end to end. The agent reads the canvas and draws on
+Phases 0–2 of the build plan complete and verified end to end. The agent reads the canvas and draws on
 it: adds shapes, connects them with arrows, relabels, deletes. Agent-drawn shapes are violet so you
 can tell who drew what.
 
@@ -26,6 +26,63 @@ agent  : create_shape {"shape":"box","text":"Postgres","near":"shape:api","direc
 
 Note it never emits coordinates — placement is relative, and the frontend computes pixels.
 
+## How a turn flows
+
+The agent's loop runs *inside* Claude Code, not in the Go server. Tool calls arrive back *into* this
+process over MCP, and the browser — not the backend — applies them to the canvas (D5), so the tldraw
+store stays the single owner of canvas state and undo/redo works for free.
+
+```mermaid
+flowchart TB
+    subgraph browser["browser"]
+        chat["useAgentSocket"]
+        canvas["canvas/execute<br/>(tldraw store)"]
+    end
+
+    subgraph server["Go server :8787"]
+        handler["ws/handler"]
+        executor["ws/executor"]
+        mcp["claudecode/mcp<br/>/mcp/{sessionID}"]
+    end
+
+    cc["claude -p<br/>subprocess"]
+
+    chat -- "① user_message<br/>+ canvas JSON" --> handler
+    handler -- "②" --> cc
+    cc -- "③" --> handler
+    handler -- "④ text" --> chat
+
+    cc -- "⑤" --> mcp
+    mcp -- "⑥" --> executor
+    executor -- "⑦ tool_call" --> canvas
+    canvas -- "⑧ tool_result<br/>+ shape ids" --> executor
+    executor -- "⑨" --> mcp
+    mcp -- "⑩" --> cc
+
+    linkStyle 0,1,2,3 stroke:#64748b,stroke-width:2px
+    linkStyle 4,5,6,7,8,9 stroke:#8b5cf6,stroke-width:2px
+```
+
+Grey is the chat path, violet the drawing path.
+
+| Step | What crosses |
+| --- | --- |
+| ② | `SendTurn` — written to the subprocess stdin as `stream-json` |
+| ③ | `assistant_delta` frames, streamed back as the agent talks |
+| ⑤ ⑩ | JSON-RPC over HTTP POST to `/mcp/{sessionID}` — how a subprocess calls back in |
+| ⑥ ⑨ | in-process `agent.ToolExecutor` call, looked up by session id |
+
+Steps ⑤–⑩ repeat for each tool the agent calls, and it chains returned shape ids into later calls
+(that is how `create_arrow` knows what to connect). Two properties of this loop are load-bearing:
+
+- **⑤–⑩ blocks the whole time.** The tool call waits on the browser, and the reply can only arrive
+  through the socket read loop — so turns are forwarded on their own goroutine. Handling them
+  synchronously deadlocks every drawing turn; `TestToolCallRoundTripDoesNotDeadlock` keeps it fixed.
+  The round-trip is bounded by a 30s timeout, so a closed tab fails the call instead of wedging the
+  session.
+- **The loop is capped** at `agent.MaxToolCallsPerTurn` (15), and Stop sends `cancel`, which cancels
+  the turn context. An uncapped agent eventually redecorates the whole canvas.
+
 ## Running it
 
 ```sh
@@ -43,10 +100,10 @@ green connected, red disconnected.
 | --- | --- |
 | `web/` | Vite + React + tldraw. Owns the canvas and executes agent tools. |
 | `server/` | Go. Owns the model loop and the WebSocket session. |
-| `plan.md` | The build plan: phases, exit criteria, risks, non-goals. |
-| `planv2.md` | The current build plan (`plan.md` is the superseded v1). |
-| `DECISIONS.md` | D1–D7, the decisions that are expensive to reverse. |
 | `spikes/` | Feasibility spikes + `FINDINGS.md`; re-run after a `claude` upgrade. |
+
+The build plan (`planv2.md`) and the decision log (`DECISIONS.md`, D1–D7) are kept local and are not
+published here; references to `D2`/`D5`/`planv2 §4.2` below point at those.
 
 ## Configuration
 
