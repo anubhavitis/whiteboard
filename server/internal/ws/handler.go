@@ -21,13 +21,38 @@ import (
 // It knows nothing about Claude Code, MCP, or any model API — only the
 // agent.Factory it was given. That is the import rule from planv2 in practice.
 type Handler struct {
-	factory agent.Factory
-	log     *slog.Logger
-	origins []string
+	// factories are the agents the UI may switch between, in dropdown order.
+	// The first is the default for a new session.
+	factories []agent.Factory
+	log       *slog.Logger
+	origins   []string
 }
 
 func NewHandler(factory agent.Factory, log *slog.Logger, allowedOrigins []string) *Handler {
-	return &Handler{factory: factory, log: log, origins: allowedOrigins}
+	return &Handler{factories: []agent.Factory{factory}, log: log, origins: allowedOrigins}
+}
+
+// NewHandlerWithAgents builds a handler the browser can switch agents on
+// (planv2.md §1.2). The first factory is the default.
+func NewHandlerWithAgents(factories []agent.Factory, log *slog.Logger, allowedOrigins []string) *Handler {
+	return &Handler{factories: factories, log: log, origins: allowedOrigins}
+}
+
+func (h *Handler) factoryNamed(name string) agent.Factory {
+	for _, f := range h.factories {
+		if f.Name() == name {
+			return f
+		}
+	}
+	return nil
+}
+
+func (h *Handler) agentNames() []string {
+	names := make([]string, 0, len(h.factories))
+	for _, f := range h.factories {
+		names = append(names, f.Name())
+	}
+	return names
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -52,20 +77,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer h.log.Info("session closed", "session", sessionID)
 
 	// The agent subprocess starts with the socket and dies with it.
-	agentSession, err := h.factory.New(r.Context(), sessionID, s.executor)
+	current := h.factories[0]
+	agentSession, err := current.New(r.Context(), sessionID, s.executor)
 	if err != nil {
 		h.log.Error("agent start failed", "err", err, "session", sessionID)
 		s.SendError(r.Context(), "could not start the agent: "+err.Error())
 		conn.Close(websocket.StatusInternalError, "agent unavailable")
 		return
 	}
-	defer agentSession.Close()
+	s.setAgent(agentSession, current.Name())
+	defer s.closeAgent()
 
 	// Agent events flow to the browser on their own goroutine, so the read loop
 	// stays free to receive tool results — the deadlock this design had before.
 	go h.forwardEvents(r.Context(), s, agentSession)
 
-	if err := h.pump(r.Context(), s, agentSession); err != nil {
+	// Tell the UI what it may switch to, so the dropdown is built from what the
+	// server actually has rather than a list that can drift.
+	if err := s.sendTyped(r.Context(), TypeAgentsAvailable, AgentsAvailable{
+		Names:   h.agentNames(),
+		Current: current.Name(),
+	}); err != nil {
+		h.log.Warn("could not send agent list", "err", err, "session", sessionID)
+	}
+
+	if err := h.pump(r.Context(), s); err != nil {
 		status := websocket.CloseStatus(err)
 		switch {
 		// StatusNoStatusRcvd is what a browser tab closing usually produces:
@@ -83,8 +119,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // forwardEvents translates agent events into browser frames.
+//
+// It exits when the agent it was started for is no longer the session's current
+// one. Neither agent implementation closes its event channel on Close — a turn
+// goroutine may still be writing to it, and closing would panic — so ranging
+// over Events() alone would leak this goroutine across a switch_agent, leaving
+// two forwarders writing to one socket.
 func (h *Handler) forwardEvents(ctx context.Context, s *session, as agent.AgentSession) {
-	for ev := range as.Events() {
+	events := as.Events()
+	for {
+		var ev agent.AgentEvent
+		select {
+		case <-ctx.Done():
+			return
+		case e, ok := <-events:
+			if !ok {
+				return
+			}
+			ev = e
+		}
+
+		// A switch replaced this agent; its remaining events are not the
+		// session's conversation any more.
+		if live, _ := s.takeAgent(); live != as {
+			return
+		}
+
 		var err error
 		switch ev.Type {
 		case agent.EventTextDelta:
@@ -105,7 +165,7 @@ func (h *Handler) forwardEvents(ctx context.Context, s *session, as agent.AgentS
 	}
 }
 
-func (h *Handler) pump(ctx context.Context, s *session, as agent.AgentSession) error {
+func (h *Handler) pump(ctx context.Context, s *session) error {
 	for {
 		_, data, err := s.conn.Read(ctx)
 		if err != nil {
@@ -122,13 +182,13 @@ func (h *Handler) pump(ctx context.Context, s *session, as agent.AgentSession) e
 			continue
 		}
 
-		if err := h.dispatch(ctx, s, as, env); err != nil {
+		if err := h.dispatch(ctx, s, env); err != nil {
 			return err
 		}
 	}
 }
 
-func (h *Handler) dispatch(ctx context.Context, s *session, as agent.AgentSession, env Envelope) error {
+func (h *Handler) dispatch(ctx context.Context, s *session, env Envelope) error {
 	switch env.Type {
 	case TypePing:
 		return s.send(ctx, Envelope{Type: TypePong})
@@ -146,6 +206,10 @@ func (h *Handler) dispatch(ctx context.Context, s *session, as agent.AgentSessio
 			"canvas_bytes", len(msg.CanvasContext),
 			"canvas_tokens_est", len(msg.CanvasContext)/4,
 		)
+		as, _ := s.takeAgent()
+		if as == nil {
+			return s.SendError(ctx, "no agent is running for this session")
+		}
 		if err := as.SendTurn(ctx, msg.Text, msg.CanvasContext); err != nil {
 			h.log.Error("send turn failed", "err", err, "session", s.id)
 			return s.SendError(ctx, err.Error())
@@ -165,6 +229,37 @@ func (h *Handler) dispatch(ctx context.Context, s *session, as agent.AgentSessio
 		// from our side; the subprocess's --max-turns bounds the rest.
 		h.log.Info("cancel requested", "session", s.id)
 		return s.SendTurnEnd(ctx)
+
+	case TypeSwitchAgent:
+		var msg SwitchAgent
+		if err := json.Unmarshal(env.Payload, &msg); err != nil {
+			return s.SendError(ctx, "malformed switch_agent payload")
+		}
+		_, currentName := s.takeAgent()
+		if msg.Name == currentName {
+			return s.sendTyped(ctx, TypeAgentSwitched, AgentSwitched{Current: currentName})
+		}
+		f := h.factoryNamed(msg.Name)
+		if f == nil {
+			return s.SendError(ctx, "unknown agent: "+msg.Name)
+		}
+
+		next, err := f.New(ctx, s.id, s.executor)
+		if err != nil {
+			h.log.Error("agent switch failed", "err", err, "session", s.id, "to", msg.Name)
+			// Keep the working agent rather than leaving the session dead.
+			return s.SendError(ctx, "could not start "+msg.Name+": "+err.Error())
+		}
+
+		// Close the outgoing agent only after the new one is live, so a failed
+		// switch cannot strand the session with no agent at all. Closing it ends
+		// its forwardEvents goroutine.
+		s.closeAgent()
+		s.setAgent(next, f.Name())
+		go h.forwardEvents(ctx, s, next)
+
+		h.log.Info("agent switched", "session", s.id, "from", currentName, "to", f.Name())
+		return s.sendTyped(ctx, TypeAgentSwitched, AgentSwitched{Current: f.Name()})
 
 	default:
 		return s.SendError(ctx, "unknown message type: "+env.Type)
@@ -191,6 +286,37 @@ type session struct {
 	executor *browserExecutor
 
 	writeMu sync.Mutex
+
+	// agentMu guards the current agent, which switch_agent can replace while a
+	// forwardEvents goroutine is still draining the outgoing one.
+	agentMu   sync.Mutex
+	agent     agent.AgentSession
+	agentName string
+}
+
+func (s *session) setAgent(as agent.AgentSession, name string) {
+	s.agentMu.Lock()
+	defer s.agentMu.Unlock()
+	s.agent, s.agentName = as, name
+}
+
+// takeAgent returns the live agent for one turn. Callers must not hold the lock
+// across a turn: SendTurn returns immediately, but a tool call inside it blocks
+// on the browser, and the read loop needs this lock to service the result.
+func (s *session) takeAgent() (agent.AgentSession, string) {
+	s.agentMu.Lock()
+	defer s.agentMu.Unlock()
+	return s.agent, s.agentName
+}
+
+func (s *session) closeAgent() {
+	s.agentMu.Lock()
+	as := s.agent
+	s.agent = nil
+	s.agentMu.Unlock()
+	if as != nil {
+		as.Close()
+	}
 }
 
 func (s *session) SendDelta(ctx context.Context, text string) error {

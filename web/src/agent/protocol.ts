@@ -8,6 +8,7 @@ export type ClientMessage =
       payload: { text: string; canvas_context?: CanvasContext };
     }
   | { type: "tool_result"; payload: ToolResult }
+  | { type: "switch_agent"; payload: { name: string } }
   | { type: "cancel" }
   | { type: "ping" };
 
@@ -16,6 +17,8 @@ export type ServerMessage =
   | { type: "tool_call"; payload: ToolCall }
   | { type: "turn_end" }
   | { type: "error"; payload: { message: string } }
+  | { type: "agents_available"; payload: { names: string[]; current: string } }
+  | { type: "agent_switched"; payload: { current: string } }
   | { type: "pong" };
 
 export interface ToolCall {

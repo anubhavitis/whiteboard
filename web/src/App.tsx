@@ -24,8 +24,11 @@ export default function App() {
     messages,
     streaming,
     error,
+    agents,
+    agent,
     sendMessage,
     cancel,
+    switchAgent,
     handleServerMessage,
   } = useChat({
     send,
@@ -48,8 +51,11 @@ export default function App() {
         streaming={streaming}
         error={error}
         status={status}
+        agents={agents}
+        agent={agent}
         onSend={sendMessage}
         onCancel={cancel}
+        onSwitchAgent={switchAgent}
       />
     </div>
   );

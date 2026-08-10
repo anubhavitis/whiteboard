@@ -31,12 +31,12 @@ func main() {
 
 	mcp := claudecode.NewMCPServer(log)
 
-	// WHITEBOARD_AGENT picks the agent explicitly; empty means autodetect.
-	// A per-session dropdown is planv2.md §1.2 and needs a protocol field, so
-	// this stays an env var until that lands.
-	factory := pickAgent(env("WHITEBOARD_AGENT", ""), mcp, mcpBase, log)
+	// Every agent that can actually run, in dropdown order. WHITEBOARD_AGENT
+	// still picks the default; the browser switches among the rest per session
+	// (planv2.md §1.2).
+	factories := availableAgents(env("WHITEBOARD_AGENT", ""), mcp, mcpBase, log)
 
-	handler := ws.NewHandler(factory, log, origins)
+	handler := ws.NewHandlerWithAgents(factories, log, origins)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           httpapi.Router(handler, mcp),
@@ -49,7 +49,8 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Info("listening", "addr", addr, "origins", origins, "agent", factory.Name())
+		log.Info("listening", "addr", addr, "origins", origins,
+			"default_agent", factories[0].Name(), "agents", agentNames(factories))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("server failed", "err", err)
 			stop()
@@ -66,45 +67,64 @@ func main() {
 	}
 }
 
-// pickAgent resolves which agent to run. Named choices fail loudly rather than
-// silently degrading: asking for "local" and getting echo would look like a
-// broken model.
-func pickAgent(choice string, mcp *claudecode.MCPServer, mcpBase string, log *slog.Logger) agent.Factory {
-	localFactory := func() agent.Factory {
-		f := native.NewFactory(
-			env("WHITEBOARD_LOCAL_BASE_URL", native.DefaultBaseURL),
-			env("WHITEBOARD_LOCAL_MODEL", native.DefaultModel),
-			agent.SystemPrompt, log)
-		log.Info("using local agent", "base_url", f.BaseURL, "model", f.Model,
-			"note", "chat-only until spike S3 (planv2.md 0.7) says otherwise")
-		return f
+// availableAgents lists every agent this process can actually run, with the one
+// named by WHITEBOARD_AGENT first so it becomes the session default.
+//
+// Only agents that can really start are offered: a dropdown entry that always
+// errors is worse than no entry. Claude Code therefore appears only when the
+// CLI is on PATH.
+func availableAgents(choice string, mcp *claudecode.MCPServer, mcpBase string, log *slog.Logger) []agent.Factory {
+	var claudeF agent.Factory
+	if path, err := exec.LookPath("claude"); err == nil {
+		log.Info("claude CLI found", "path", path, "mcp_base", mcpBase)
+		claudeF = claudecode.NewFactory(mcp, mcpBase, agent.SystemPrompt, log)
+	} else {
+		log.Warn("claude CLI not on PATH — the claude agent will not be offered")
 	}
 
-	switch choice {
-	case "local", "native":
-		return localFactory()
-	case "echo":
-		log.Info("using echo agent (explicitly requested)")
-		return agent.EchoFactory{}
-	case "claude", "claudecode":
-		if path, err := exec.LookPath("claude"); err == nil {
-			log.Info("claude CLI found", "path", path, "mcp_base", mcpBase)
-			return claudecode.NewFactory(mcp, mcpBase, agent.SystemPrompt, log)
-		}
-		log.Error("WHITEBOARD_AGENT=claude but the claude CLI is not on PATH")
-		return agent.EchoFactory{}
-	case "":
-		// Autodetect, unchanged: Claude Code is the working agent today.
-		if path, err := exec.LookPath("claude"); err == nil {
-			log.Info("claude CLI found", "path", path, "mcp_base", mcpBase)
-			return claudecode.NewFactory(mcp, mcpBase, agent.SystemPrompt, log)
-		}
-		log.Warn("claude CLI not found on PATH — falling back to echo agent")
-		return agent.EchoFactory{}
-	default:
-		log.Error("unknown WHITEBOARD_AGENT, falling back to echo", "value", choice)
-		return agent.EchoFactory{}
+	localF := native.NewFactory(
+		env("WHITEBOARD_LOCAL_BASE_URL", native.DefaultBaseURL),
+		env("WHITEBOARD_LOCAL_MODEL", native.DefaultModel),
+		agent.SystemPrompt, log)
+	log.Info("local agent configured", "base_url", localF.BaseURL, "model", localF.Model,
+		"note", "chat-only until the native tool loop exists; S3 passed 10/10")
+
+	// The local agent is always offered even when mlx_lm.server is down: it is a
+	// per-turn HTTP call, so it starts fine and reports a clear connection error
+	// rather than failing at session start.
+	all := []agent.Factory{}
+	if claudeF != nil {
+		all = append(all, claudeF)
 	}
+	all = append(all, localF, agent.EchoFactory{})
+
+	// Move the requested default to the front.
+	want := map[string]string{
+		"claude": "claude-code", "claudecode": "claude-code", "claude-code": "claude-code",
+		"local": "local", "native": "local", "echo": "echo",
+	}[choice]
+	if choice != "" && want == "" {
+		log.Error("unknown WHITEBOARD_AGENT, using the first available", "value", choice)
+	}
+	if want != "" {
+		for i, f := range all {
+			if f.Name() == want {
+				all[0], all[i] = all[i], all[0]
+				return all
+			}
+		}
+		log.Error("WHITEBOARD_AGENT is not available, using the first one",
+			"wanted", choice, "available", agentNames(all))
+	}
+	return all
+}
+
+func agentNames(fs []agent.Factory) []string {
+	names := make([]string, 0, len(fs))
+	for _, f := range fs {
+		names = append(names, f.Name())
+	}
+	return names
 }
 
 func env(key, fallback string) string {

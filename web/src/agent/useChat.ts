@@ -28,53 +28,81 @@ export function useChat({ send, editorRef }: Options) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The dropdown is built from what the server offers, not a hardcoded list.
+  const [agents, setAgents] = useState<string[]>([]);
+  const [agent, setAgent] = useState<string | null>(null);
 
   // The id of the assistant message currently being streamed into.
   const activeId = useRef<string | null>(null);
 
   const handleServerMessage = useCallback(
     (msg: ServerMessage) => {
-    switch (msg.type) {
-      case "assistant_delta": {
-        setStreaming(true);
-        setMessages((prev) => {
-          if (activeId.current === null) {
-            const id = messageId();
-            activeId.current = id;
-            return [...prev, { id, role: "assistant", text: msg.payload.text }];
-          }
-          return prev.map((m) =>
-            m.id === activeId.current
-              ? { ...m, text: m.text + msg.payload.text }
-              : m,
-          );
-        });
-        break;
-      }
-      case "tool_call": {
-        // D5: the browser owns canvas state, so tools execute here and the
-        // result goes back over the same socket.
-        const editor = editorRef.current;
-        const result: ToolResult = editor
-          ? executeToolCall(editor, msg.payload)
-          : { id: msg.payload.id, ok: false, error: "canvas not ready" };
+      switch (msg.type) {
+        case "assistant_delta": {
+          setStreaming(true);
+          setMessages((prev) => {
+            if (activeId.current === null) {
+              const id = messageId();
+              activeId.current = id;
+              return [
+                ...prev,
+                { id, role: "assistant", text: msg.payload.text },
+              ];
+            }
+            return prev.map((m) =>
+              m.id === activeId.current
+                ? { ...m, text: m.text + msg.payload.text }
+                : m,
+            );
+          });
+          break;
+        }
+        case "tool_call": {
+          // D5: the browser owns canvas state, so tools execute here and the
+          // result goes back over the same socket.
+          const editor = editorRef.current;
+          const result: ToolResult = editor
+            ? executeToolCall(editor, msg.payload)
+            : { id: msg.payload.id, ok: false, error: "canvas not ready" };
 
-        // A new assistant message should follow the tool call rather than
-        // appending to the text that preceded it.
-        activeId.current = null;
-        send({ type: "tool_result", payload: result });
-        break;
-      }
-      case "turn_end":
-        activeId.current = null;
-        setStreaming(false);
-        break;
-      case "error":
-        // Surfaced in the UI rather than swallowed (plan.md §5.2).
-        activeId.current = null;
-        setStreaming(false);
-        setError(msg.payload.message);
-        break;
+          // A new assistant message should follow the tool call rather than
+          // appending to the text that preceded it.
+          activeId.current = null;
+          send({ type: "tool_result", payload: result });
+          break;
+        }
+        case "turn_end":
+          activeId.current = null;
+          setStreaming(false);
+          break;
+        case "error":
+          // Surfaced in the UI rather than swallowed (plan.md §5.2).
+          activeId.current = null;
+          setStreaming(false);
+          setError(msg.payload.message);
+          break;
+        case "agents_available":
+          setAgents(msg.payload.names);
+          setAgent(msg.payload.current);
+          break;
+        case "agent_switched": {
+          setAgent(msg.payload.current);
+          activeId.current = null;
+          setStreaming(false);
+          // Each agent keeps its own history, so the new one has no memory of
+          // what came before. Say so rather than letting the transcript imply
+          // continuity that does not exist.
+          const name = msg.payload.current;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: messageId(),
+              role: "assistant",
+              text: `— switched to ${name}. It starts with a fresh thread and has not seen the messages above. —`,
+            },
+          ]);
+          break;
+        }
       }
     },
     [send, editorRef],
@@ -114,5 +142,26 @@ export function useChat({ send, editorRef }: Options) {
     setStreaming(false);
   }, [send]);
 
-  return { messages, streaming, error, sendMessage, cancel, handleServerMessage };
+  // Switching mid-turn would leave the outgoing agent streaming into a
+  // transcript that has moved on, so this is guarded here as well as disabled
+  // in the UI.
+  const switchAgent = useCallback(
+    (name: string) => {
+      if (streaming || name === agent) return;
+      send({ type: "switch_agent", payload: { name } });
+    },
+    [send, streaming, agent],
+  );
+
+  return {
+    messages,
+    streaming,
+    error,
+    agents,
+    agent,
+    sendMessage,
+    cancel,
+    switchAgent,
+    handleServerMessage,
+  };
 }

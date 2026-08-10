@@ -1,3 +1,40 @@
+/* Light is the default; only the tokens change in dark mode. Assistant replies
+   were previously hardcoded light-on-light, which made them unreadable when the
+   OS (or a dark-mode extension) put the page in dark. */
+:root {
+  --wb-panel: #fff;
+  --wb-border: #e4e4e7;
+  --wb-text: #18181b;
+  --wb-muted: #71717a;
+  --wb-bubble-user-bg: #18181b;
+  --wb-bubble-user-text: #fff;
+  --wb-bubble-agent-bg: #f4f4f5;
+  --wb-bubble-agent-text: #18181b;
+  --wb-input-bg: #fff;
+  --wb-input-border: #d4d4d8;
+  --wb-input-disabled-bg: #fafafa;
+  --wb-error-bg: #fef2f2;
+  --wb-error-text: #b91c1c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wb-panel: #18181b;
+    --wb-border: #2e2e33;
+    --wb-text: #f4f4f5;
+    --wb-muted: #a1a1aa;
+    --wb-bubble-user-bg: #3f3f46;
+    --wb-bubble-user-text: #fafafa;
+    --wb-bubble-agent-bg: #27272a;
+    --wb-bubble-agent-text: #f4f4f5;
+    --wb-input-bg: #1f1f23;
+    --wb-input-border: #3f3f46;
+    --wb-input-disabled-bg: #202024;
+    --wb-error-bg: #3b1517;
+    --wb-error-text: #fca5a5;
+  }
+}
+
 .app {
   position: fixed;
   inset: 0;
@@ -17,8 +54,9 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-left: 1px solid #e4e4e7;
-  background: #fff;
+  border-left: 1px solid var(--wb-border);
+  background: var(--wb-panel);
+  color: var(--wb-text);
 }
 
 .chat__header {
@@ -27,8 +65,34 @@
   justify-content: space-between;
   gap: 8px;
   padding: 12px 14px;
-  border-bottom: 1px solid #e4e4e7;
+  border-bottom: 1px solid var(--wb-border);
   font-weight: 600;
+}
+
+/* Agent picker, under the header. Hidden when only one agent is available. */
+.chat__agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--wb-border);
+  font-size: 12px;
+  color: var(--wb-muted);
+}
+
+.chat__agent select {
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--wb-input-border);
+  border-radius: 6px;
+  background: var(--wb-panel);
+  color: var(--wb-text);
+  font: inherit;
+}
+
+.chat__agent select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .chat__messages {
@@ -43,7 +107,7 @@
 
 .chat__empty {
   margin: 0;
-  color: #71717a;
+  color: var(--wb-muted);
 }
 
 .chat__message {
@@ -56,20 +120,20 @@
 .chat__message--user {
   align-self: flex-end;
   max-width: 85%;
-  background: #18181b;
-  color: #fff;
+  background: var(--wb-bubble-user-bg);
+  color: var(--wb-bubble-user-text);
 }
 
 .chat__message--assistant {
-  background: #f4f4f5;
-  color: #18181b;
+  background: var(--wb-bubble-agent-bg);
+  color: var(--wb-bubble-agent-text);
 }
 
 .chat__error {
   padding: 8px 11px;
   border-radius: 10px;
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--wb-error-bg);
+  color: var(--wb-error-text);
 }
 
 .chat__composer {
@@ -77,35 +141,38 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  border-top: 1px solid #e4e4e7;
+  border-top: 1px solid var(--wb-border);
 }
 
 .chat__composer textarea {
   resize: none;
   padding: 8px;
-  border: 1px solid #d4d4d8;
+  border: 1px solid var(--wb-input-border);
   border-radius: 8px;
+  background: var(--wb-input-bg);
+  color: var(--wb-text);
   font: inherit;
 }
 
 .chat__composer textarea:disabled {
-  background: #fafafa;
-  color: #a1a1aa;
+  background: var(--wb-input-disabled-bg);
+  color: var(--wb-muted);
 }
 
 .chat__composer button {
   padding: 8px 14px;
   border: 0;
   border-radius: 8px;
-  background: #18181b;
-  color: #fff;
+  background: var(--wb-bubble-user-bg);
+  color: var(--wb-bubble-user-text);
   font: inherit;
   font-weight: 500;
   cursor: pointer;
 }
 
 .chat__composer button:disabled {
-  background: #d4d4d8;
+  background: var(--wb-input-border);
+  color: var(--wb-muted);
   cursor: not-allowed;
 }
 
@@ -117,7 +184,7 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 400;
-  color: #71717a;
+  color: var(--wb-muted);
 }
 
 .connection-dot__light {
@@ -128,10 +195,10 @@
 
 .chat__stop {
   padding: 8px 14px;
-  border: 1px solid #d4d4d8;
+  border: 1px solid var(--wb-input-border);
   border-radius: 8px;
-  background: #fff;
-  color: #18181b;
+  background: var(--wb-panel);
+  color: var(--wb-text);
   font: inherit;
   font-weight: 500;
   cursor: pointer;

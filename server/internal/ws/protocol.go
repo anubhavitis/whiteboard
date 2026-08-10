@@ -12,15 +12,18 @@ const (
 	TypeToolResult  = "tool_result"
 	TypeCancel      = "cancel"
 	TypePing        = "ping"
+	TypeSwitchAgent = "switch_agent"
 )
 
 // Message types sent by the server.
 const (
-	TypeAssistantDelta = "assistant_delta"
-	TypeToolCall       = "tool_call"
-	TypeTurnEnd        = "turn_end"
-	TypeError          = "error"
-	TypePong           = "pong"
+	TypeAssistantDelta  = "assistant_delta"
+	TypeToolCall        = "tool_call"
+	TypeTurnEnd         = "turn_end"
+	TypeError           = "error"
+	TypePong            = "pong"
+	TypeAgentsAvailable = "agents_available"
+	TypeAgentSwitched   = "agent_switched"
 )
 
 // Envelope is the outer frame of every message in both directions. Payload is
@@ -35,6 +38,26 @@ type Envelope struct {
 type UserMessage struct {
 	Text          string          `json:"text"`
 	CanvasContext json.RawMessage `json:"canvas_context,omitempty"`
+}
+
+// SwitchAgent asks to replace this session's agent (planv2.md §1.2 — the chat
+// panel's dropdown is just a string on the wire). Name must be one the server
+// offers in AgentsAvailable.
+type SwitchAgent struct {
+	Name string `json:"name"`
+}
+
+// AgentsAvailable is sent once on connect so the UI can render its dropdown
+// from what the server actually has, rather than a hardcoded list that can drift.
+type AgentsAvailable struct {
+	Names   []string `json:"names"`
+	Current string   `json:"current"`
+}
+
+// AgentSwitched confirms a switch. The transcript is not replayed into the new
+// agent: each agent keeps its own history, so switching starts a fresh thread.
+type AgentSwitched struct {
+	Current string `json:"current"`
 }
 
 // ToolResult reports the outcome of a tool the browser executed against the

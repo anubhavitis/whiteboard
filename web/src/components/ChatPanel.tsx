@@ -8,17 +8,30 @@ interface Props {
   streaming: boolean;
   error: string | null;
   status: ConnectionStatus;
+  agents: string[];
+  agent: string | null;
   onSend: (text: string) => void;
   onCancel: () => void;
+  onSwitchAgent: (name: string) => void;
 }
+
+/** What each agent is, for the dropdown. Unknown names fall back to the name. */
+const AGENT_LABELS: Record<string, string> = {
+  "claude-code": "Claude Code — can draw",
+  local: "Local MLX — chat only",
+  echo: "Echo — offline test",
+};
 
 export function ChatPanel({
   messages,
   streaming,
   error,
   status,
+  agents,
+  agent,
   onSend,
   onCancel,
+  onSwitchAgent,
 }: Props) {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -42,6 +55,26 @@ export function ChatPanel({
         <ConnectionDot status={status} />
       </header>
 
+      {agents.length > 1 && (
+        <div className="chat__agent">
+          <label htmlFor="agent-select">Agent</label>
+          <select
+            id="agent-select"
+            value={agent ?? ""}
+            onChange={(e) => onSwitchAgent(e.target.value)}
+            // Switching mid-turn would orphan the streaming reply.
+            disabled={streaming}
+            title={streaming ? "Finish or stop the turn first" : undefined}
+          >
+            {agents.map((name) => (
+              <option key={name} value={name}>
+                {AGENT_LABELS[name] ?? name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="chat__messages" ref={listRef}>
         {messages.length === 0 && (
           <p className="chat__empty">
@@ -49,7 +82,10 @@ export function ChatPanel({
           </p>
         )}
         {messages.map((message) => (
-          <div key={message.id} className={`chat__message chat__message--${message.role}`}>
+          <div
+            key={message.id}
+            className={`chat__message chat__message--${message.role}`}
+          >
             {message.text}
           </div>
         ))}
