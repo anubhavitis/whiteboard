@@ -7,6 +7,10 @@ bin/
 *.db
 .DS_Store
 
+# python venvs (spike harnesses)
+.venv/
+__pycache__/
+
 # local planning docs
 plan.md
 planv2.md

@@ -15,6 +15,7 @@ import (
 	"github.com/anubhavitis/whiteboard/server/internal/agent"
 	"github.com/anubhavitis/whiteboard/server/internal/claudecode"
 	"github.com/anubhavitis/whiteboard/server/internal/httpapi"
+	"github.com/anubhavitis/whiteboard/server/internal/native"
 	"github.com/anubhavitis/whiteboard/server/internal/ws"
 )
 
@@ -30,14 +31,10 @@ func main() {
 
 	mcp := claudecode.NewMCPServer(log)
 
-	var factory agent.Factory
-	if path, err := exec.LookPath("claude"); err == nil {
-		log.Info("claude CLI found", "path", path, "mcp_base", mcpBase)
-		factory = claudecode.NewFactory(mcp, mcpBase, agent.SystemPrompt, log)
-	} else {
-		log.Warn("claude CLI not found on PATH — falling back to echo agent")
-		factory = agent.EchoFactory{}
-	}
+	// WHITEBOARD_AGENT picks the agent explicitly; empty means autodetect.
+	// A per-session dropdown is planv2.md §1.2 and needs a protocol field, so
+	// this stays an env var until that lands.
+	factory := pickAgent(env("WHITEBOARD_AGENT", ""), mcp, mcpBase, log)
 
 	handler := ws.NewHandler(factory, log, origins)
 	srv := &http.Server{
@@ -66,6 +63,47 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("shutdown failed", "err", err)
+	}
+}
+
+// pickAgent resolves which agent to run. Named choices fail loudly rather than
+// silently degrading: asking for "local" and getting echo would look like a
+// broken model.
+func pickAgent(choice string, mcp *claudecode.MCPServer, mcpBase string, log *slog.Logger) agent.Factory {
+	localFactory := func() agent.Factory {
+		f := native.NewFactory(
+			env("WHITEBOARD_LOCAL_BASE_URL", native.DefaultBaseURL),
+			env("WHITEBOARD_LOCAL_MODEL", "local"),
+			agent.SystemPrompt, log)
+		log.Info("using local agent", "base_url", f.BaseURL, "model", f.Model,
+			"note", "chat-only until spike S3 (planv2.md 0.7) says otherwise")
+		return f
+	}
+
+	switch choice {
+	case "local", "native":
+		return localFactory()
+	case "echo":
+		log.Info("using echo agent (explicitly requested)")
+		return agent.EchoFactory{}
+	case "claude", "claudecode":
+		if path, err := exec.LookPath("claude"); err == nil {
+			log.Info("claude CLI found", "path", path, "mcp_base", mcpBase)
+			return claudecode.NewFactory(mcp, mcpBase, agent.SystemPrompt, log)
+		}
+		log.Error("WHITEBOARD_AGENT=claude but the claude CLI is not on PATH")
+		return agent.EchoFactory{}
+	case "":
+		// Autodetect, unchanged: Claude Code is the working agent today.
+		if path, err := exec.LookPath("claude"); err == nil {
+			log.Info("claude CLI found", "path", path, "mcp_base", mcpBase)
+			return claudecode.NewFactory(mcp, mcpBase, agent.SystemPrompt, log)
+		}
+		log.Warn("claude CLI not found on PATH — falling back to echo agent")
+		return agent.EchoFactory{}
+	default:
+		log.Error("unknown WHITEBOARD_AGENT, falling back to echo", "value", choice)
+		return agent.EchoFactory{}
 	}
 }
 
