@@ -1,0 +1,13 @@
+node_modules/
+dist/
+bin/
+*.tsbuildinfo
+.env
+.env.local
+*.db
+.DS_Store
+
+# local planning docs
+plan.md
+planv2.md
+DECISIONS.md

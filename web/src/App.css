@@ -1,0 +1,138 @@
+.app {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  font: 14px/1.5 system-ui, sans-serif;
+}
+
+.app__canvas {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Chat panel */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid #e4e4e7;
+  background: #fff;
+}
+
+.chat__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e4e4e7;
+  font-weight: 600;
+}
+
+.chat__messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat__empty {
+  margin: 0;
+  color: #71717a;
+}
+
+.chat__message {
+  padding: 8px 11px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat__message--user {
+  align-self: flex-end;
+  max-width: 85%;
+  background: #18181b;
+  color: #fff;
+}
+
+.chat__message--assistant {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.chat__error {
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.chat__composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid #e4e4e7;
+}
+
+.chat__composer textarea {
+  resize: none;
+  padding: 8px;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.chat__composer textarea:disabled {
+  background: #fafafa;
+  color: #a1a1aa;
+}
+
+.chat__composer button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #18181b;
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chat__composer button:disabled {
+  background: #d4d4d8;
+  cursor: not-allowed;
+}
+
+/* Connection indicator, inline in the chat header */
+
+.connection-dot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #71717a;
+}
+
+.connection-dot__light {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.chat__stop {
+  padding: 8px 14px;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  background: #fff;
+  color: #18181b;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
