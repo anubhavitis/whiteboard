@@ -183,8 +183,16 @@ def build_messages(system: str, think: bool) -> list[dict]:
     ]
 
 
+# 100 shapes measures 7,915 tokens with this model's own tokenizer, which is the
+# ~8k canvas §0.7 asks about. Do not switch to a len()/4 estimate: for canvas JSON
+# that understates by ~2.2x (260 shapes reads as ~9.5k but is really 20.9k), which
+# would silently turn this into a 21k-token measurement.
+BIG_CANVAS_SHAPES = 100
+
+
 def big_canvas_probe(tools, system) -> None:
     """§0.7 also asks for tokens/sec against an ~8k-token canvas."""
+    n = BIG_CANVAS_SHAPES
     shapes = [
         {
             "id": f"shape:n{i:04d}",
@@ -195,10 +203,10 @@ def big_canvas_probe(tools, system) -> None:
             "w": 160,
             "h": 80,
         }
-        for i in range(260)
+        for i in range(n)
     ]
     arrows = [
-        {"from": f"shape:n{i:04d}", "to": f"shape:n{i+1:04d}"} for i in range(259)
+        {"from": f"shape:n{i:04d}", "to": f"shape:n{i+1:04d}"} for i in range(n - 1)
     ]
     payload = {
         "model": "local",
@@ -216,8 +224,7 @@ def big_canvas_probe(tools, system) -> None:
         "max_tokens": 128,
         "temperature": 0.0,
     }
-    approx_tokens = len(json.dumps(payload["messages"])) // 4
-    print(f"\n--- big-canvas probe (~{approx_tokens} tokens of context) ---")
+    print(f"\n--- big-canvas probe ({n} shapes, ~8k tokens by this model's tokenizer) ---")
     t0 = time.time()
     try:
         r = post(payload)
@@ -226,11 +233,15 @@ def big_canvas_probe(tools, system) -> None:
         return
     dt = time.time() - t0
     usage = r.get("usage") or {}
+    prompt_toks = usage.get("prompt_tokens") or 0
     comp = usage.get("completion_tokens") or 0
-    print(f"  wall: {dt:.1f}s   usage: {usage}")
+    print(f"  wall: {dt:.1f}s")
+    print(f"  prompt tokens (server-reported): {prompt_toks}")
+    print(f"  completion tokens: {comp}")
     if comp and dt:
-        print(f"  generation: {comp/dt:.1f} tok/s")
-    print(f"  turn feels: {'OK' if dt < 20 else 'TOO SLOW (>20s, see planv2 5.3)'}")
+        print(f"  end-to-end: {comp/dt:.1f} tok/s (includes prefill)")
+    verdict = "OK" if dt < 20 else "TOO SLOW (>20s -> local needs canvas diffing, planv2 5.3)"
+    print(f"  turn latency: {verdict}")
 
 
 def main() -> int:
