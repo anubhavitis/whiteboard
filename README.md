@@ -45,12 +45,14 @@ text streams out to the chat panel as it arrives.
 The dashed path is the second agent, and it is the reason `agent.AgentSession` is shaped the way it
 is. The two agents put the loop on **opposite sides of the process boundary**:
 
-| | Claude Code (built) | MLX / Qwen3 (planned) |
+| | Claude Code | MLX / Qwen3 |
 | --- | --- | --- |
-| Who owns the loop | Claude Code itself | our Go code |
-| How tool calls arrive | pushed *in* over MCP | parsed *out of* the streamed response |
+| Who owns the loop | Claude Code itself | our Go code (`internal/native`) |
+| How tool calls arrive | pushed *in* over MCP | parsed *out of* the stream — not built |
 | Transport | subprocess stdio + HTTP callback | OpenAI-compatible HTTP to `mlx_lm.server` |
 | Auth | your Claude Code subscription | none — runs on your machine |
+| Multi-turn memory | the subprocess, via `--resume` | ours: the endpoint is stateless |
+| Status | reads and draws | reads and answers; drawing gated on S3 |
 
 That is why the seam sits *above* the loop rather than at the model-API level: an interface at the
 API level could not span both. Both implementations reach the canvas through the same
@@ -58,10 +60,11 @@ API level could not span both. Both implementations reach the canvas through the
 only the left edge differs. Nothing outside the two agent implementations may import
 `anthropic`/`openai`/`mcp`/`exec` packages; that single import rule is what keeps this swappable.
 
-**Status: unproven.** The local agent is not built, and whether it gets tools *at all* is gated on a
-spike that has not run yet (Qwen3 must produce valid tool calls in ≥8/10 trials). Below that bar it
-stays chat- and critique-only — useful, but it would not drive the violet path. Treat the dashed
-edges as intent, not as description.
+**Status.** The chat half of the local agent is built and verified end to end against an
+OpenAI-compatible endpoint. The drawing half is not: whether the local model gets tools *at all* is
+gated on spike S3, which requires Qwen3 to produce valid tool calls in ≥8/10 trials. Below that bar it
+stays chat- and critique-only, and would never drive the violet path. `spikes/s3/` holds the harness;
+it scores against the same schemas the real agents use, dumped from Go rather than retyped.
 
 The violet loop repeats for each tool the agent calls, chaining returned shape ids into later calls —
 that is how `create_arrow` knows what to connect. Two properties of it are load-bearing:
@@ -85,6 +88,19 @@ Frontend on http://localhost:5173, server on http://localhost:8787. The canvas f
 the chat panel docked right; a dot in the panel header shows the agent connection — amber connecting,
 green connected, red disconnected.
 
+### Running against a local model
+
+`WHITEBOARD_AGENT` picks the agent; leaving it unset autodetects (Claude Code if `claude` is on PATH,
+otherwise echo). The local agent talks to any OpenAI-compatible endpoint:
+
+```sh
+mlx_lm.server --model mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit --port 8080
+WHITEBOARD_AGENT=local make dev
+```
+
+It is **chat-only** — it reads the canvas and answers, but does not draw. Whether it ever draws is
+gated on the tool-calling spike described below.
+
 ## Layout
 
 | Path | What |
@@ -104,6 +120,9 @@ published here; references to `D2`/`D5`/`planv2 §4.2` below point at those.
 | `WHITEBOARD_ADDR` | `:8787` | server |
 | `WHITEBOARD_ALLOWED_ORIGINS` | `localhost:5173` | server, comma-separated |
 | `WHITEBOARD_MCP_BASE_URL` | `http://127.0.0.1:<port>` | server — where subprocesses call tools back |
+| `WHITEBOARD_AGENT` | autodetect | server — `local`, `echo`, or `claude` |
+| `WHITEBOARD_LOCAL_BASE_URL` | `http://127.0.0.1:8080/v1` | server — OpenAI-compatible endpoint |
+| `WHITEBOARD_LOCAL_MODEL` | `local` | server — model name sent to that endpoint |
 | `VITE_WS_URL` | `ws://localhost:8787/ws` | web |
 
 Requires the `claude` CLI on PATH, logged in. No API key.
