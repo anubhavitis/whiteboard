@@ -191,6 +191,11 @@ func (s *Session) ClaudeSessionID() string {
 	return s.claudeSessionID
 }
 
+// Cancel is a no-op: Claude Code owns its own loop, so there is no loop here to
+// stop. Its --max-turns bounds the subprocess, and the handler still reports
+// turn_end to the browser so the UI stops waiting.
+func (s *Session) Cancel() {}
+
 func (s *Session) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.closed)

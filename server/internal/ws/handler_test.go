@@ -74,6 +74,8 @@ func (s *toolSession) emit(ev agent.AgentEvent) {
 
 func (s *toolSession) Events() <-chan agent.AgentEvent { return s.events }
 
+func (s *toolSession) Cancel() {}
+
 func (s *toolSession) Close() error {
 	s.once.Do(func() { close(s.closed) })
 	return nil
@@ -284,6 +286,8 @@ func (s *namedSession) emit(ev agent.AgentEvent) {
 }
 
 func (s *namedSession) Events() <-chan agent.AgentEvent { return s.events }
+
+func (s *namedSession) Cancel() {}
 
 // Close deliberately does not close events: a turn goroutine may still be
 // writing to it, exactly like the real agents.

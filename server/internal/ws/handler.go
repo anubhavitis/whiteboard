@@ -225,9 +225,14 @@ func (h *Handler) dispatch(ctx context.Context, s *session, env Envelope) error 
 		return nil
 
 	case TypeCancel:
-		// Claude Code owns its own loop, so cancelling means ending the turn
-		// from our side; the subprocess's --max-turns bounds the rest.
+		// Ask the agent to stop first: an agent whose loop we own would otherwise
+		// keep issuing tool calls after the UI has moved on. Claude Code's Cancel
+		// is a no-op — its --max-turns bounds the subprocess — so for that agent
+		// this remains just the turn_end the UI is waiting for.
 		h.log.Info("cancel requested", "session", s.id)
+		if as, _ := s.takeAgent(); as != nil {
+			as.Cancel()
+		}
 		return s.SendTurnEnd(ctx)
 
 	case TypeSwitchAgent:

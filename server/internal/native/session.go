@@ -43,10 +43,15 @@ type Session struct {
 	closed  chan struct{}
 	once    sync.Once
 
-	// mu guards history: SendTurn returns before its turn finishes, so a
-	// second turn can arrive while the first is still streaming.
+	// mu guards history and cancelTurn: SendTurn returns before its turn
+	// finishes, so a second turn can arrive while the first is still streaming.
 	mu      sync.Mutex
 	history []message
+
+	// cancelTurn stops the turn in flight. A new turn cancels the previous one:
+	// two loops interleaving tool calls would corrupt both the canvas and the
+	// ordering of this session's history.
+	cancelTurn context.CancelFunc
 }
 
 type message struct {
@@ -62,6 +67,14 @@ func (s *Session) SendTurn(ctx context.Context, text string, canvas json.RawMess
 	}
 
 	s.mu.Lock()
+	// One turn at a time: a second turn supersedes the first rather than running
+	// beside it.
+	if s.cancelTurn != nil {
+		s.cancelTurn()
+	}
+	turnCtx, cancel := context.WithCancel(ctx)
+	s.cancelTurn = cancel
+
 	s.history = append(s.history, message{Role: "user", Content: user})
 	// Copy under the lock: the request must not observe a later turn's append.
 	convo := make([]message, 0, len(s.history)+1)
@@ -69,8 +82,19 @@ func (s *Session) SendTurn(ctx context.Context, text string, canvas json.RawMess
 	convo = append(convo, s.history...)
 	s.mu.Unlock()
 
-	go s.runTurn(ctx, convo)
+	go s.runTurn(turnCtx, convo)
 	return nil
+}
+
+// Cancel stops the turn in flight. Safe to call with no turn running.
+func (s *Session) Cancel() {
+	s.mu.Lock()
+	cancel := s.cancelTurn
+	s.cancelTurn = nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // buildUserContent packs the message and the canvas into one user turn. The
@@ -226,7 +250,11 @@ func (s *Session) emit(ev agent.AgentEvent) {
 func (s *Session) Events() <-chan agent.AgentEvent { return s.events }
 
 // Close is safe to call twice.
+//
+// It deliberately does NOT close the events channel: a turn goroutine may still
+// be writing to it, and closing would panic. emit selects on s.closed instead.
 func (s *Session) Close() error {
+	s.Cancel()
 	s.once.Do(func() { close(s.closed) })
 	return nil
 }

@@ -84,6 +84,17 @@ type ToolOutcome struct {
 type AgentSession interface {
 	SendTurn(ctx context.Context, text string, canvas json.RawMessage) error
 	Events() <-chan AgentEvent
+
+	// Cancel stops the turn in flight, if any, and is a no-op otherwise. It must
+	// be safe to call at any time and from any goroutine.
+	//
+	// This exists because the two agents cancel in different places, which is the
+	// same asymmetry that puts this interface above the loop: an agent whose loop
+	// we own keeps issuing tool calls until something stops it, while Claude Code
+	// owns its loop and bounds itself with --max-turns. Sending turn_end to the
+	// browser is enough for the latter and not for the former.
+	Cancel()
+
 	Close() error
 }
 

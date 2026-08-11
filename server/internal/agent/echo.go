@@ -49,6 +49,9 @@ func (e *echoSession) emit(ev AgentEvent) {
 
 func (e *echoSession) Events() <-chan AgentEvent { return e.events }
 
+// Cancel is a no-op: an echo turn is a handful of sends and is already over.
+func (e *echoSession) Cancel() {}
+
 func (e *echoSession) Close() error {
 	e.once.Do(func() {
 		close(e.closed)
