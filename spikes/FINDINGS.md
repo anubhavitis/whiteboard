@@ -173,6 +173,53 @@ work is not urgent at 8k (2.9s), but a 300-shape brainstorm is a 20k-token promp
 
 ---
 
+## S3b — the native tool loop, end to end · PASS
+
+Ran 2026-08-11 against the real model through the real WebSocket, with a client
+standing in for the browser (assigning ids, rejecting unknown ones) exactly as
+`web/src/canvas/execute.ts` does.
+
+| Scenario | Result |
+| --- | --- |
+| Add a shape and connect it | 3 calls, 3.1s, 1 shape, 1 arrow |
+| Flow chart from an empty canvas | 8 calls, 7.1s, 4 shapes, 3 arrows, all chained |
+| Rename a shape, then connect to it | 2 calls, 1.8s |
+| Delete a shape | 1 call, 1.1s |
+| Question only ("don't change anything") | **0 tool calls**, 0.4s |
+| "What depends on the Queue?" | correct, reasoned from arrows, no drawing |
+
+**Streaming with tools works, and mlx_lm is easier than OpenAI here.** It emits
+each tool call as ONE complete frame — full `name` and complete `arguments` — with
+`finish_reason: "tool_calls"`. Real OpenAI fragments `arguments` across deltas.
+The parser accumulates by `index` anyway, as insurance for the day the endpoint
+changes; against mlx_lm 0.31.3 that branch never fires. This retired the design's
+largest unverified assumption (S3 itself only ever used `stream:false`).
+
+**The model always guesses the new shape's id** — every drawing run did it, e.g.
+`create_shape` + `create_arrow{to_id:"shape:postgresDb"}` in one response, and the
+canvas rejects the arrow. Recovery is one extra iteration and it converges.
+
+**Two wordings of the tool result are load-bearing, both found by measurement:**
+
+1. Told only *"created; use this id"*, the model recovered from the rejected arrow
+   by calling `create_shape` **again** — duplicating the box. The result now says
+   "this shape now exists — do not create it again", and the duplicate disappeared.
+2. A rejection now also carries `shapes_you_created_this_turn`, so the error names
+   the ids that do exist rather than only the one that does not.
+
+Neither is cosmetic: without them the loop silently produces duplicate shapes or
+unconnected ones. **Server-side id rewriting was rejected** — mapping a guessed id
+onto "the shape created just before" means guessing intent and silently drawing
+something the user did not ask for. The honest error plus a retry costs ~1.5s and
+keeps the model's intent visible.
+
+Zero raw-coordinate violations across every run, so the never-emit-pixels rule
+holds under pressure. Arguments are stripped and warned about anyway, because the
+frontend ignores unknown keys — the model would otherwise believe it had
+positioned something.
+
+---
+
 ## Budget note (measured, not projected)
 
 The S1 run reported:

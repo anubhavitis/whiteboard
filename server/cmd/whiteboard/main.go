@@ -87,7 +87,7 @@ func availableAgents(choice string, mcp *claudecode.MCPServer, mcpBase string, l
 		env("WHITEBOARD_LOCAL_MODEL", native.DefaultModel),
 		agent.SystemPrompt, log)
 	log.Info("local agent configured", "base_url", localF.BaseURL, "model", localF.Model,
-		"note", "chat-only until the native tool loop exists; S3 passed 10/10")
+		"tools", "enabled")
 
 	// The local agent is always offered even when mlx_lm.server is down: it is a
 	// per-turn HTTP call, so it starts fine and reports a clear connection error

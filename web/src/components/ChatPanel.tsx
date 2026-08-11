@@ -18,7 +18,7 @@ interface Props {
 /** What each agent is, for the dropdown. Unknown names fall back to the name. */
 const AGENT_LABELS: Record<string, string> = {
   "claude-code": "Claude Code — can draw",
-  local: "Local MLX — chat only",
+  local: "Local MLX — can draw",
   echo: "Echo — offline test",
 };
 

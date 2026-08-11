@@ -60,7 +60,7 @@
     <text x="149" y="330">tldraw store — owns canvas state</text>
     <text x="500" y="452">/mcp/{sessionID}</text>
     <text x="851" y="154">owns its own loop</text>
-    <text x="851" y="329">chat works · inference only,</text>
+    <text x="851" y="329">reads and draws · inference only,</text>
     <text x="851" y="344">Go owns the loop</text>
     <text x="851" y="419">fallback · no model needed</text>
   </g>
@@ -110,17 +110,15 @@
     <text x="718" y="270">SSE deltas stream back</text>
   </g>
 
-  <!-- Dashed and deliberately stopping short of ws/executor: nothing parses
-       tool calls out of the local stream yet, and native.Factory.New discards
-       the ToolExecutor it is handed (internal/native/factory.go). -->
-  <!-- Stops in open space on purpose: this edge does not exist in the code. -->
-  <g stroke="#cbd5e1" stroke-width="1.75" fill="none" stroke-dasharray="6 4">
-    <path d="M598,340 L660,340"/>
+  <!-- The local model's tool path. Our Go code parses tool calls out of the SSE
+       stream (native/turn.go) and dispatches them through the same ToolExecutor
+       Claude Code reaches over MCP — which is why only the left edge differs. -->
+  <g stroke="#7c3aed" stroke-width="1.75" fill="none" marker-end="url(#a-violet)">
+    <path d="M752,340 L700,340 L700,368 L598,368"/>
   </g>
-  <circle cx="663" cy="340" r="2.5" fill="#cbd5e1"/>
-  <g font-size="10.5" fill="#94a3b8">
-    <text x="600" y="362">tool calls out of the</text>
-    <text x="600" y="375">stream — NOT BUILT</text>
+  <g font-size="10.5" fill="#5b21b6">
+    <text x="606" y="386">tool calls parsed</text>
+    <text x="606" y="399">out of the stream</text>
   </g>
 
   <!-- ============ legend ============ -->
@@ -130,6 +128,6 @@
     <line x1="128" y1="0" x2="154" y2="0" stroke="#7c3aed" stroke-width="2"/>
     <text x="162" y="4" fill="#334155">drawing — built; the browser executes every tool</text>
     <line x1="470" y1="0" x2="496" y2="0" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 4"/>
-    <text x="504" y="4" fill="#334155">not built — S3 passed 10/10, so this is next</text>
+    <text x="504" y="4" fill="#334155">process boundary</text>
   </g>
 </svg>

@@ -50,21 +50,24 @@ func NewFactory(baseURL, model, prompt string, log *slog.Logger) *Factory {
 // Name is the value the chat panel's dropdown sends.
 func (f *Factory) Name() string { return "local" }
 
-// New starts a session. The executor is accepted and ignored: this agent is
-// chat-only until spike S3 says the local model can be trusted with tools
-// (planv2.md §0.7).
-func (f *Factory) New(_ context.Context, _ string, _ agent.ToolExecutor) (agent.AgentSession, error) {
+// New starts a session. A non-nil executor turns on the tool loop; nil keeps the
+// session chat-only.
+func (f *Factory) New(_ context.Context, _ string, exec agent.ToolExecutor) (agent.AgentSession, error) {
 	timeout := f.Timeout
 	if timeout == 0 {
 		timeout = 5 * time.Minute
 	}
 	return &Session{
-		client:  &http.Client{Timeout: timeout},
-		baseURL: f.BaseURL,
-		model:   f.Model,
-		prompt:  f.Prompt,
-		log:     f.Log,
-		events:  make(chan agent.AgentEvent, 64),
-		closed:  make(chan struct{}),
+		client: &client{
+			http:    &http.Client{Timeout: timeout},
+			baseURL: f.BaseURL,
+			model:   f.Model,
+			log:     f.Log,
+		},
+		prompt:   f.Prompt,
+		log:      f.Log,
+		executor: exec,
+		events:   make(chan agent.AgentEvent, 64),
+		closed:   make(chan struct{}),
 	}, nil
 }

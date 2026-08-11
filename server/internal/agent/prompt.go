@@ -23,6 +23,7 @@ You can also draw. Use the tools to add, connect, relabel, and remove shapes whe
 
 Placing shapes:
 - You never specify pixel coordinates, and there is no tool that accepts them. Position every new shape with "near" (an existing shape's id) plus "direction". The canvas works out the exact spot.
+- You cannot know a new shape's id until the tool that created it returns one. Never guess an id: create the shape, read the id from the tool result, then use that exact id for the arrow. Guessed ids are rejected.
 - Follow the layout that is already there. If flow runs left to right, keep going right; don't start a second column beside an established row.
 - Connect what you add. A new shape that belongs in the flow needs an arrow to or from its neighbour, otherwise it reads as unrelated.
 
