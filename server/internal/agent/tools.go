@@ -131,10 +131,36 @@ func MCPTools() []map[string]any {
 	return out
 }
 
-// JSONSchemaTools renders the tool set for an OpenAI/Anthropic-style native
-// loop. Unused until planv2.md §3.6, but written now so the single-source-of-
-// truth claim is real rather than aspirational.
-func JSONSchemaTools() []map[string]any {
+// OpenAITools renders the tool set for an OpenAI-compatible endpoint, which is
+// what a native loop talks to (mlx_lm.server today, any compatible server later).
+//
+// The nesting matters and is not cosmetic: mlx_lm hands `tools` straight to the
+// model's Jinja chat template, and Qwen3's template reads `.function.name` and
+// `.function.parameters`. A flat {name, description, input_schema} object — the
+// Anthropic shape — templates to nothing, and mlx_lm does not complain: the
+// model simply never learns the tools exist. This is the exact shape spike S3
+// scored 10/10 against (spikes/FINDINGS.md).
+func OpenAITools() []map[string]any {
+	tools := Tools()
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  t.Schema.toJSON(),
+			},
+		})
+	}
+	return out
+}
+
+// AnthropicTools renders the tool set for an Anthropic-style API, where the
+// schema key is `input_schema` and there is no `function` wrapper. Nothing calls
+// this yet; it exists so the "schemas defined once" claim survives the day an
+// API key path appears.
+func AnthropicTools() []map[string]any {
 	tools := Tools()
 	out := make([]map[string]any, 0, len(tools))
 	for _, t := range tools {
