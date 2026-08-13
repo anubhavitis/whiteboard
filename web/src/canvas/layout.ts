@@ -4,8 +4,31 @@ export type Direction = "above" | "below" | "left_of" | "right_of";
 
 export const DEFAULT_SHAPE = { w: 160, h: 90 };
 
-/** Space left between a new shape and its anchor. */
-const GAP = 70;
+/**
+ * Size overrides per shape kind.
+ *
+ * A diamond only has its full width at the vertical midline, so a label that
+ * fits a 160px box overflows a 160px diamond. Decision nodes also tend to hold a
+ * question rather than two words. Sized generously on both axes.
+ */
+export const SIZE_FOR_SHAPE: Record<string, { w: number; h: number }> = {
+  diamond: { w: 240, h: 140 },
+};
+
+/** sizeFor returns the box a shape kind should be drawn at. */
+export function sizeFor(shape: string | undefined): { w: number; h: number } {
+  return SIZE_FOR_SHAPE[shape ?? ""] ?? DEFAULT_SHAPE;
+}
+
+/**
+ * Space left between a new shape and its anchor.
+ *
+ * Sized for a *labelled* arrow, not a bare one. An arrow's label renders at the
+ * midpoint of the connector, so at the old 70px the "yes" on a decision branch
+ * drew on top of both shapes it sat between. Connectors also read as connectors
+ * only when they are visibly longer than the gap between two touching boxes.
+ */
+const GAP = 140;
 
 /** How far to step when nudging out of a collision. */
 const NUDGE = 30;
@@ -19,7 +42,10 @@ export interface Placement {
 }
 
 function shapeBounds(editor: Editor, shape: TLShape): Box {
-  return editor.getShapePageBounds(shape) ?? Box.From({ x: shape.x, y: shape.y, ...DEFAULT_SHAPE });
+  return (
+    editor.getShapePageBounds(shape) ??
+    Box.From({ x: shape.x, y: shape.y, ...DEFAULT_SHAPE })
+  );
 }
 
 /**
@@ -84,9 +110,19 @@ function avoidCollisions(
     right_of: { x: NUDGE, y: 0 },
   }[direction];
 
+  // Pad the candidate so a shape does not merely stop overlapping but keeps
+  // breathing room — two boxes sharing an edge still read as one blob, and an
+  // arrow between them has nowhere to draw its label.
+  const pad = NUDGE;
+
   let { x, y } = start;
   for (let i = 0; i < MAX_NUDGES; i++) {
-    const candidate = Box.From({ x, y, w: size.w, h: size.h });
+    const candidate = Box.From({
+      x: x - pad,
+      y: y - pad,
+      w: size.w + pad * 2,
+      h: size.h + pad * 2,
+    });
     if (!existing.some((b) => b.collides(candidate))) break;
     x += step.x;
     y += step.y;

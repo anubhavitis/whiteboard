@@ -26,6 +26,9 @@ type turn struct {
 	// madeIDs are the shapes created during this turn, in order. They are the
 	// ids a guessed reference almost certainly meant.
 	madeIDs []string
+	// madeShapes pairs each created id with the label it was given, so a rejection
+	// can say which id belongs to which shape.
+	madeShapes []map[string]string
 	// redactor keeps shape ids out of the text the person reads.
 	redactor idRedactor
 	// nudged records that the model has already been told once that it claimed a
@@ -77,6 +80,19 @@ func (t *turn) flushText() {
 // created returns the shape ids this turn has made so far.
 func (t *turn) created() []string {
 	return t.madeIDs
+}
+
+// recordShape remembers a created shape's id alongside its label.
+func (t *turn) recordShape(id string, call toolCall) {
+	var a struct {
+		Text string `json:"text"`
+	}
+	json.Unmarshal(call.Args, &a)
+	label := a.Text
+	if label == "" {
+		label = "(no label)"
+	}
+	t.madeShapes = append(t.madeShapes, map[string]string{"label": label, "id": id})
 }
 
 // repeatLimit is how many times the same call may be made before the loop tells
@@ -303,9 +319,13 @@ func (t *turn) execute(ctx context.Context, call toolCall) message {
 		// A rejected reference is nearly always a guessed id for a shape this
 		// turn just created, so name the ids that do exist. Without this the
 		// model's recovery was to create the shape a second time (measured).
-		if ids := t.created(); len(ids) > 0 {
-			fail["shapes_you_created_this_turn"] = ids
-			fail["hint"] = "use one of these existing ids; do not create the shape again"
+		if made := t.madeShapes; len(made) > 0 {
+			// Pair each id with the label it was created under. Bare ids are
+			// interchangeable to the model, so it picks the wrong one or invents a
+			// third; "Add sugar" -> the id that box actually got is matchable.
+			fail["shapes_you_created_this_turn"] = made
+			fail["hint"] = "use the exact id listed next to the label you meant; " +
+				"do not create the shape again and do not invent an id"
 		}
 		return reply(fail)
 	}
@@ -323,6 +343,7 @@ func (t *turn) execute(ctx context.Context, call toolCall) message {
 		// create_shape AGAIN, duplicating the box. It needs to be told the shape is
 		// done, not just what to call it.
 		t.madeIDs = append(t.madeIDs, out.ShapeIDs[0])
+		t.recordShape(out.ShapeIDs[0], call)
 		res["id"] = out.ShapeIDs[0]
 		res["note"] = "this shape now exists — do not create it again; use this exact id to reference it"
 	default:

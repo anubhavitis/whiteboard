@@ -64,6 +64,9 @@ func clean(s string) string {
 	// "(shape:x)" and "(shape:x, shape:y)" are the common shapes of the mistake;
 	// removing the id alone would leave "()" or " ()" behind.
 	out = emptyParens.ReplaceAllString(out, "")
+	// The model often writes an id inside backticks ("has ID `shape:x`"), which
+	// redaction leaves as a stray `` — visibly broken rather than merely terse.
+	out = emptyTicks.ReplaceAllString(out, "")
 	out = strings.ReplaceAll(out, "(id: )", "")
 	out = strings.ReplaceAll(out, "(id )", "")
 	out = spaceBeforePunct.ReplaceAllString(out, "$1")
@@ -73,6 +76,7 @@ func clean(s string) string {
 
 var (
 	emptyParens      = regexp.MustCompile(`\s*\(\s*(?:id\s*:?\s*)?[,\s]*\)`)
+	emptyTicks       = regexp.MustCompile("\\s*`\\s*`")
 	spaceBeforePunct = regexp.MustCompile(`\s+([,.;:!?])`)
 	multiSpace       = regexp.MustCompile(`(?m)[ \t]{2,}`)
 )

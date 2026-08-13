@@ -1,9 +1,9 @@
 import { createShapeId, toRichText, type Editor, type TLShapeId } from "tldraw";
 import type { ToolCall, ToolResult } from "../agent/protocol";
 import {
-  DEFAULT_SHAPE,
   placeInViewport,
   placeRelative,
+  sizeFor,
   type Direction,
 } from "./layout";
 
@@ -96,10 +96,14 @@ function createShape(editor: Editor, call: ToolCall): ToolResult {
     return fail(call, `no shape with id ${args.near}`);
   }
 
+  // The size must be the same on both sides: placeRelative checks collisions
+  // against it, and the shape is drawn with it. Passing the default here while
+  // drawing something larger is how a diamond ended up overlapping its neighbour.
+  const size = sizeFor(args.shape);
   const position =
     anchor && args.direction
-      ? placeRelative(editor, anchor, args.direction)
-      : placeInViewport(editor);
+      ? placeRelative(editor, anchor, args.direction, size)
+      : placeInViewport(editor, size);
 
   editor.run(() => {
     if (args.shape === "text") {
@@ -119,7 +123,7 @@ function createShape(editor: Editor, call: ToolCall): ToolResult {
       y: position.y,
       props: {
         geo: GEO_FOR_SHAPE[args.shape ?? "box"] ?? "rectangle",
-        ...DEFAULT_SHAPE,
+        ...size,
         richText: toRichText(args.text!),
         color: AGENT_COLOR,
       },

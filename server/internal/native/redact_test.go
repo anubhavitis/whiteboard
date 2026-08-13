@@ -137,3 +137,25 @@ func TestLongParentheticalIsNotHeldIndefinitely(t *testing.T) {
 		t.Error("a parenthetical with no id should not be buffered wholesale")
 	}
 }
+
+// The model writes ids inside backticks; redaction must not leave “ behind.
+func TestRemovesEmptyBackticks(t *testing.T) {
+	got := stream("The diamond has ID `shape:aB3` and the box has ID `shape:cD4`.")
+	if strings.Contains(got, "`") {
+		t.Errorf("stray backticks survived: %q", got)
+	}
+	if strings.Contains(got, "shape:") {
+		t.Errorf("id survived: %q", got)
+	}
+	if !strings.Contains(got, "The diamond has ID") {
+		t.Errorf("prose damaged: %q", got)
+	}
+}
+
+// Backticks around real content must survive.
+func TestKeepsBackticksAroundRealText(t *testing.T) {
+	in := "Use the `create_arrow` tool."
+	if got := stream(in); got != in {
+		t.Errorf("got %q, want %q", got, in)
+	}
+}
