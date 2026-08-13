@@ -3,40 +3,41 @@
 A local-first AI thinking partner on an infinite canvas. Chat and canvas share one brain: the agent
 can read what you've drawn and draw back.
 
-**Stack:** React + tldraw · Go (session hub, MCP server) · two interchangeable agents: a Claude Code subprocess (no API key) and a local MLX/Qwen3 model
-
-Canvas state lives in the browser's tldraw store and persists there; the server keeps no database.
+**Stack:** React + tldraw · Go (session hub, MCP server) · two interchangeable agents: a Claude Code
+subprocess (no API key) and a local MLX/Qwen3 model. Canvas state lives in the browser's tldraw store.
 
 ## Status
 
-Phases 0–2 of the build plan complete and verified end to end, plus the native tool loop (§3.6) and a
-per-session skills picker (§1.2). Either agent reads the canvas and draws on it: adds shapes, connects
-them with arrows, relabels, deletes. Agent-drawn shapes are violet so you
-can tell who drew what.
+Either agent reads the canvas and draws on it: adds shapes, connects them with arrows, relabels,
+deletes. Agent-drawn shapes are violet so you can tell who drew what.
 
 **No API key needed, either way.** Claude Code runs as a `claude -p` subprocess authenticated by your
 subscription, with canvas tools reaching it through an MCP server the Go backend hosts. The local agent
 talks to `mlx_lm.server` on your own machine and costs nothing per turn. Pick one from the dropdown in
 the chat panel; if neither is available the canvas still works and the agent echoes your text back.
 
-A real turn, captured from the running server:
+A drawing turn, with the retry that really happens in it:
 
 ```
-you    : "Add a Postgres database below the API Gateway and connect them."
-agent  : create_shape {"shape":"box","text":"Postgres","near":"shape:api","direction":"below"}
-         create_arrow {"from_id":"shape:api","to_id":"shape:gen1"}
-         "…one thing worth noting: a gateway talking straight to a database is unusual."
+you    : "Add a Postgres database below the Auth Service and connect them."
+agent  : create_shape  → the canvas answers with the new shape's id
+         create_arrow  → rejected: it guessed an id for the shape it had just made
+         create_arrow  → accepted, using the id the canvas returned
+         "Added Postgres below Auth Service and connected them."
 ```
 
-Note it never emits coordinates — placement is relative, and the frontend computes pixels. Shapes are
-`box`, `ellipse`, `diamond` (a decision point) or `text`.
+The agent cannot know a new shape's id in the response that creates it — the browser assigns ids — so
+the first arrow is a guess and gets rejected. It corrects on the next pass. That round trip is normal,
+costs a second or two, and is why the wording of a tool result matters (see `docs/agent-behaviour.md`).
+
+It never emits coordinates either: placement is relative and the frontend computes pixels.
 
 ## How a turn flows
 
 Where the agent's loop runs depends on which agent you picked: *inside* Claude Code, with tool calls
 arriving back over MCP, or inside the Go server, with tool calls parsed out of the model's stream.
-Either way the browser — not the backend — applies them to the canvas (D5), so the tldraw store stays
-the single owner of canvas state and undo/redo works for free.
+Either way the browser — not the backend — applies them to the canvas, so the tldraw store stays the
+single owner of canvas state and undo/redo works for free.
 
 <p align="center">
   <img src="docs/turn-flow.svg" alt="A turn flows from the browser to ws/handler, out to whichever agent is running, and back to ws/executor, which asks the browser to execute each canvas tool. Claude Code returns tool calls over MCP; the local MLX model has them parsed out of its stream." width="100%">
@@ -85,8 +86,9 @@ that is how `create_arrow` knows what to connect. Two properties of it are load-
   synchronously deadlocks every drawing turn; `TestToolCallRoundTripDoesNotDeadlock` keeps it fixed.
   The round-trip is bounded by a 30s timeout, so a closed tab fails the call instead of wedging the
   session.
-- **The loop is capped** at `agent.MaxToolCallsPerTurn` (15), and Stop sends `cancel`, which cancels
-  the turn context. An uncapped agent eventually redecorates the whole canvas.
+- **Both loops are capped, by different mechanisms.** The native loop stops at
+  `agent.MaxToolCallsPerTurn`; Claude Code bounds itself with `--max-turns`. Stop sends `cancel`, which
+  cancels the turn context. An uncapped agent eventually redecorates the whole canvas.
 
 ## Running it
 
@@ -151,8 +153,8 @@ Two things worth knowing:
 | `server/internal/agent/skills/` | Built-in optional skills, embedded in the binary. |
 | `skills/` | Your own skills. Gitignored — they never leave your machine. |
 
-The build plan (`planv2.md`) and the decision log (`DECISIONS.md`, D1–D9) are kept local and are not
-published here; references to `D2`/`D5`/`D8`/`D9` and `planv2` sections point at those.
+The build plan and decision log are kept local and are not published, so the reasoning that matters is
+inlined here and in `docs/` rather than cited by number.
 
 ## Configuration
 
@@ -163,7 +165,7 @@ published here; references to `D2`/`D5`/`D8`/`D9` and `planv2` sections point at
 | `WHITEBOARD_MCP_BASE_URL` | `http://127.0.0.1:<port>` | server — where subprocesses call tools back |
 | `WHITEBOARD_AGENT` | autodetect | server — `local`, `echo`, or `claude` |
 | `WHITEBOARD_LOCAL_BASE_URL` | `http://127.0.0.1:8080/v1` | server — OpenAI-compatible endpoint |
-| `WHITEBOARD_LOCAL_MODEL` | `…Qwen3-30B-A3B-Instruct-2507-8bit` | server — must be a real HF repo id, not an alias |
+| `WHITEBOARD_LOCAL_MODEL` | `mlx-community/Qwen3-30B-A3B-Instruct-2507-8bit` | server — must be a real HF repo id, not an alias |
 | `WHITEBOARD_SKILLS_DIR` | `skills` | server — where your own skills are read and written |
 | `VITE_WS_URL` | `ws://localhost:8787/ws` | web |
 
@@ -178,7 +180,7 @@ running. Neither needs an API key.
 - **Usage is shared with your normal Claude Code work** — same subscription window. Config isolation
   keeps a turn ~6x cheaper than the naive setup; see `spikes/FINDINGS.md`.
 - **The `claude` CLI is a moving dependency.** After upgrading it, re-run the spikes in `spikes/`
-  before trusting sessions (planv2 §5.5). Verified against 2.1.228.
+  before trusting sessions. Versions verified against are recorded in `spikes/FINDINGS.md`.
 - **`mlx-lm` is one too.** The tool-call format it emits is version-specific: 0.31.3 sends each call
   whole in one SSE frame rather than fragmenting arguments the way the OpenAI API does. The parser
   handles both, but re-run `spikes/s3` after upgrading.
@@ -190,4 +192,4 @@ running. Neither needs an API key.
 ## Licensing note
 
 tldraw is not MIT. The free tier carries a "Made with tldraw" watermark; removing it requires a paid
-license. Accepted for a personal tool — see D2 in `DECISIONS.md` if this ever ships as a product.
+license. Accepted for a personal tool; it would need revisiting before this shipped as a product.
