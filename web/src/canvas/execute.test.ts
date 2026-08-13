@@ -228,3 +228,71 @@ describe("failure handling", () => {
     );
   });
 });
+
+describe("label props match what each shape type accepts", () => {
+  // Regression: arrows were created with props.richText, which tldraw rejects.
+  // The ValidationError is thrown inside editor.run(), so it escapes the tool's
+  // try/catch and takes the whole store down — the user gets tldraw's crash
+  // screen ("At shape(type = arrow).props.richText: Unexpected property")
+  // instead of a failed tool call. The fake editor records props without
+  // validating them, so this asserts the prop NAMES rather than relying on it.
+  it("labels an arrow with plain text, never richText", () => {
+    const r = fakeEditor([shape("shape:a", 0, 0), shape("shape:b", 400, 0)]);
+    executeToolCall(r.editor, {
+      id: "t1",
+      name: "create_arrow",
+      args: { from_id: "shape:a", to_id: "shape:b", text: "yes" },
+    });
+    const arrow = r.created.find((c) => c.type === "arrow");
+    const props = arrow?.props as Record<string, unknown>;
+    expect(props.text).toBe("yes");
+    expect(props).not.toHaveProperty("richText");
+  });
+
+  it("labels a geo shape with richText, never plain text", () => {
+    const r = fakeEditor();
+    executeToolCall(r.editor, {
+      id: "t1",
+      name: "create_shape",
+      args: { shape: "box", text: "Postgres" },
+    });
+    const props = r.created[0].props as Record<string, unknown>;
+    expect(props).toHaveProperty("richText");
+    expect(props).not.toHaveProperty("text");
+  });
+
+  it("relabels an arrow with plain text", () => {
+    const arrow = { id: "shape:arr", type: "arrow", x: 0, y: 0, props: {} } as unknown as TLShape;
+    const r = fakeEditor([arrow]);
+    executeToolCall(r.editor, {
+      id: "t1",
+      name: "update_shape",
+      args: { id: "shape:arr", text: "no" },
+    });
+    const props = r.updated[0].props as Record<string, unknown>;
+    expect(props.text).toBe("no");
+    expect(props).not.toHaveProperty("richText");
+  });
+
+  it("relabels a geo shape with richText", () => {
+    const r = fakeEditor([shape("shape:a")]);
+    executeToolCall(r.editor, {
+      id: "t1",
+      name: "update_shape",
+      args: { id: "shape:a", text: "Redis" },
+    });
+    const props = r.updated[0].props as Record<string, unknown>;
+    expect(props).toHaveProperty("richText");
+    expect(props).not.toHaveProperty("text");
+  });
+
+  it("maps diamond to the tldraw diamond geo", () => {
+    const r = fakeEditor();
+    executeToolCall(r.editor, {
+      id: "t1",
+      name: "create_shape",
+      args: { shape: "diamond", text: "Is it green tea?" },
+    });
+    expect((r.created[0].props as { geo: string }).geo).toBe("diamond");
+  });
+});

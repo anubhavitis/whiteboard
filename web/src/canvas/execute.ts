@@ -13,6 +13,19 @@ import {
  */
 export const AGENT_COLOR = "violet";
 
+/**
+ * The prop a shape labels with, which differs by shape type.
+ *
+ * Arrows take a plain `text` string; geo and text shapes take `richText`. Using
+ * the wrong one throws a ValidationError from inside editor.run() — "At
+ * shape(type = arrow).props.richText: Unexpected property" — which takes the
+ * whole tldraw store down and shows the user a crash screen rather than a failed
+ * tool call.
+ */
+function labelProps(shapeType: string, text: string): Record<string, unknown> {
+  return shapeType === "arrow" ? { text } : { richText: toRichText(text) };
+}
+
 const GEO_FOR_SHAPE: Record<string, string> = {
   box: "rectangle",
   ellipse: "ellipse",
@@ -133,7 +146,11 @@ function createArrow(editor: Editor, call: ToolCall): ToolResult {
       type: "arrow",
       props: {
         color: AGENT_COLOR,
-        ...(args.text ? { richText: toRichText(args.text) } : {}),
+        // Arrows label with a PLAIN `text` string. richText is a geo-shape prop:
+        // setting it here throws "At shape(type = arrow).props.richText:
+        // Unexpected property" from inside editor.run(), which takes the whole
+        // tldraw store down and shows the user a crash screen.
+        ...(args.text ? labelProps("arrow", args.text) : {}),
       },
     });
     // Bindings are what make the arrow follow its shapes — and what the
@@ -168,7 +185,9 @@ function updateShape(editor: Editor, call: ToolCall): ToolResult {
 
   editor.run(() => {
     const props: Record<string, unknown> = {};
-    if (args.text !== undefined) props.richText = toRichText(args.text);
+    if (args.text !== undefined) {
+      Object.assign(props, labelProps(shape.type, args.text));
+    }
     if (args.color !== undefined) props.color = args.color;
     editor.updateShape({ id: shape.id, type: shape.type, props });
   });
