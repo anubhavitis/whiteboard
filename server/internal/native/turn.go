@@ -206,6 +206,19 @@ func (t *turn) execute(ctx context.Context, call toolCall) message {
 		})
 	}
 
+	// A self-loop is never what the person meant, and the canvas happily draws a
+	// degenerate arrow on top of the shape. Measured: asked to branch a flow, the
+	// model emitted create_arrow{from_id: X, to_id: X} alongside the real ones.
+	if call.Name == "create_arrow" {
+		if from, to, ok := arrowEnds(call.Args); ok && from == to {
+			return reply(map[string]any{
+				"ok": false,
+				"error": "from_id and to_id are the same shape — an arrow needs two " +
+					"different shapes; use the id of the shape you actually want to point at",
+			})
+		}
+	}
+
 	args, warn := sanitizeArgs(call.Args)
 	if warn != "" {
 		t.sess.log.Warn("native: model emitted forbidden argument", "tool", call.Name, "warn", warn)
@@ -298,4 +311,16 @@ func sanitizeArgs(raw json.RawMessage) (json.RawMessage, string) {
 		return raw, ""
 	}
 	return cleaned, strings.Join(found, "/") + " ignored — position with near and direction, not coordinates"
+}
+
+// arrowEnds pulls the two endpoints out of create_arrow arguments.
+func arrowEnds(raw json.RawMessage) (from, to string, ok bool) {
+	var a struct {
+		From string `json:"from_id"`
+		To   string `json:"to_id"`
+	}
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return "", "", false
+	}
+	return a.From, a.To, a.From != "" && a.To != ""
 }

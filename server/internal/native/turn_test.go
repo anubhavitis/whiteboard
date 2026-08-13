@@ -686,3 +686,51 @@ func TestMissingCallIDIsSynthesised(t *testing.T) {
 		t.Error("a tool call must always carry an id; the executor keys waiters by it")
 	}
 }
+
+// A self-loop is never meaningful and the canvas draws it anyway, so the loop
+// must refuse it. Measured: asked to branch a flow, the model emitted
+// create_arrow{from_id: X, to_id: X} alongside the real arrows.
+func TestSelfLoopArrowIsRefused(t *testing.T) {
+	script := &scriptedServer{replies: []string{
+		toolFrame(0, "c1", "create_arrow", `{"from_id":"shape:t2","to_id":"shape:t2"}`) +
+			finishFrame("tool_calls"),
+		textFrame("ok") + finishFrame("stop"),
+	}}
+	exec := &fakeExecutor{fallback: agent.ToolOutcome{OK: true}}
+	s, done := newToolSession(t, script, exec)
+	defer done()
+
+	s.SendTurn(context.Background(), "connect", nil)
+	drain(t, s)
+
+	if n := len(exec.invocations()); n != 0 {
+		t.Errorf("executor ran %d times; a self-loop must never reach the canvas", n)
+	}
+	var told bool
+	for _, m := range messagesOf(t, script.body(1)) {
+		if m["role"] == "tool" && strings.Contains(m["content"].(string), "same shape") {
+			told = true
+		}
+	}
+	if !told {
+		t.Error("the model should be told why the arrow was refused")
+	}
+}
+
+func TestDistinctEndpointsStillPass(t *testing.T) {
+	script := &scriptedServer{replies: []string{
+		toolFrame(0, "c1", "create_arrow", `{"from_id":"shape:a","to_id":"shape:b"}`) +
+			finishFrame("tool_calls"),
+		textFrame("ok") + finishFrame("stop"),
+	}}
+	exec := &fakeExecutor{fallback: agent.ToolOutcome{OK: true}}
+	s, done := newToolSession(t, script, exec)
+	defer done()
+
+	s.SendTurn(context.Background(), "connect", nil)
+	drain(t, s)
+
+	if n := len(exec.invocations()); n != 1 {
+		t.Errorf("executor ran %d times, want 1", n)
+	}
+}
