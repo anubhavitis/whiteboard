@@ -15,9 +15,45 @@ export function estimateTokens(json: string): number {
   return Math.ceil(json.length / 4);
 }
 
+/**
+ * Collects the text out of a tldraw richText document.
+ *
+ * tldraw ships `renderPlaintextFromRichText`, but it needs a live editor's
+ * internal caches, which makes the serializer untestable without a DOM. The
+ * document is plain ProseMirror-shaped JSON, so walking it costs a few lines and
+ * keeps this a pure function. Paragraph breaks become newlines; everything else
+ * concatenates.
+ */
+function plainTextFromRichText(node: unknown): string {
+  if (!node || typeof node !== "object") return "";
+  const n = node as { type?: string; text?: string; content?: unknown[] };
+  if (typeof n.text === "string") return n.text;
+  if (!Array.isArray(n.content)) return "";
+  const parts = n.content.map(plainTextFromRichText);
+  return n.type === "doc" ? parts.filter(Boolean).join("\n") : parts.join("");
+}
+
+/**
+ * Reads a shape's label.
+ *
+ * This tldraw version stores labels as `richText`, not `props.text` — which is
+ * also what execute.ts writes (via toRichText). Reading only `props.text` meant
+ * every hand-drawn shape arrived at the model with NO label, so the agent had
+ * nothing to call things by and quoted `shape:HAxxVP1i` back at the user.
+ * `props.text` is still checked first, for older shapes and for shape types that
+ * never moved to rich text.
+ */
 function readText(shape: TLShape): string | undefined {
-  const text = (shape.props as { text?: unknown }).text;
-  return typeof text === "string" && text.length > 0 ? text : undefined;
+  const props = shape.props as { text?: unknown; richText?: unknown };
+
+  if (typeof props.text === "string" && props.text.length > 0) {
+    return props.text;
+  }
+  if (props.richText) {
+    const plain = plainTextFromRichText(props.richText).trim();
+    if (plain.length > 0) return plain;
+  }
+  return undefined;
 }
 
 function readSize(shape: TLShape): { w: number; h: number } {
@@ -56,7 +92,11 @@ export function serializeCanvas(editor: Editor): CanvasContext {
       h,
     };
     const text = readText(shape);
-    if (text) entry.text = text;
+    if (text) {
+      entry.text = text;
+    } else {
+      entry.unlabeled = true;
+    }
     if (selected.has(shape.id)) entry.selected = true;
     shapes.push(entry);
   }

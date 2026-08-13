@@ -23,6 +23,29 @@ function fakeEditor(options: {
   } as unknown as Editor;
 }
 
+/**
+ * A shape whose label lives in richText, which is what tldraw actually stores
+ * and what execute.ts writes. The earlier fixtures used props.text — a shape the
+ * real app never produces — which is exactly why a serializer that only read
+ * props.text passed its tests while sending the model unlabeled shapes.
+ */
+const richBox = (id: string, text: string, x = 0, y = 0) => ({
+  id,
+  type: "geo",
+  x,
+  y,
+  props: {
+    w: 100,
+    h: 50,
+    richText: {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text }] },
+      ],
+    },
+  },
+});
+
 const box = (id: string, text: string, x = 0, y = 0) => ({
   id,
   type: "geo",
@@ -165,5 +188,51 @@ describe("serializeCanvas", () => {
       expect(result.truncated).toBe(false);
       expect(result.shapes).toHaveLength(2);
     });
+  });
+});
+
+describe("labels stored as richText", () => {
+  // Regression: tldraw stores labels in props.richText, and execute.ts writes
+  // them that way. A serializer reading only props.text sent the model shapes
+  // with no labels at all, so the agent quoted opaque ids back at the user.
+  it("reads a label out of richText", () => {
+    const editor = fakeEditor({ shapes: [richBox("shape:a", "Auth Service")] });
+    expect(serializeCanvas(editor).shapes[0].text).toBe("Auth Service");
+  });
+
+  it("still reads a plain props.text label", () => {
+    const editor = fakeEditor({ shapes: [box("shape:a", "Frontend")] });
+    expect(serializeCanvas(editor).shapes[0].text).toBe("Frontend");
+  });
+
+  it("marks a shape with no label as unlabeled", () => {
+    // Without this the model reads a missing text field as licence to use the id
+    // as a name and reports a box "labeled shape:HAxxVP1i".
+    const editor = fakeEditor({
+      shapes: [{ id: "shape:a", type: "geo", x: 0, y: 0, props: { w: 10, h: 10 } }],
+    });
+    const shape = serializeCanvas(editor).shapes[0];
+    expect(shape.unlabeled).toBe(true);
+    expect(shape).not.toHaveProperty("text");
+  });
+
+  it("does not mark a labelled shape as unlabeled", () => {
+    const editor = fakeEditor({ shapes: [richBox("shape:a", "Auth")] });
+    expect(serializeCanvas(editor).shapes[0]).not.toHaveProperty("unlabeled");
+  });
+
+  it("omits the label when richText is empty", () => {
+    const editor = fakeEditor({
+      shapes: [
+        {
+          id: "shape:a",
+          type: "geo",
+          x: 0,
+          y: 0,
+          props: { w: 10, h: 10, richText: { type: "doc", content: [{ type: "paragraph" }] } },
+        },
+      ],
+    });
+    expect(serializeCanvas(editor).shapes[0]).not.toHaveProperty("text");
   });
 });

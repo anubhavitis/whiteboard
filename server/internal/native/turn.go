@@ -26,6 +26,22 @@ type turn struct {
 	// madeIDs are the shapes created during this turn, in order. They are the
 	// ids a guessed reference almost certainly meant.
 	madeIDs []string
+	// redactor keeps shape ids out of the text the person reads.
+	redactor idRedactor
+}
+
+// emitText streams assistant text to the UI with shape ids stripped.
+func (t *turn) emitText(delta string) {
+	if safe := t.redactor.push(delta); safe != "" {
+		t.sess.emit(agent.AgentEvent{Type: agent.EventTextDelta, Text: safe})
+	}
+}
+
+// flushText emits anything the redactor was holding back at end of stream.
+func (t *turn) flushText() {
+	if tail := t.redactor.flush(); tail != "" {
+		t.sess.emit(agent.AgentEvent{Type: agent.EventTextDelta, Text: tail})
+	}
 }
 
 // created returns the shape ids this turn has made so far.
@@ -61,9 +77,8 @@ func (t *turn) run(ctx context.Context) {
 			tools = nil
 		}
 
-		res, err := t.sess.client.complete(ctx, t.convo, tools, func(delta string) {
-			t.sess.emit(agent.AgentEvent{Type: agent.EventTextDelta, Text: delta})
-		})
+		res, err := t.sess.client.complete(ctx, t.convo, tools, t.emitText)
+		t.flushText()
 		if err != nil {
 			if ctx.Err() != nil {
 				return
