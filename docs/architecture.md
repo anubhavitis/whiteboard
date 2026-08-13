@@ -12,6 +12,10 @@ the identifier that holds it.
 `agent.AgentSession` exists because the two agents put their loop on **opposite
 sides of the process boundary**:
 
+<p align="center">
+  <img src="agent-seam.svg" alt="Above the AgentSession line, ws/handler and ws/executor know nothing about models. Below it, Claude Code runs its loop inside a subprocess and pushes tool calls back over MCP, while the native agent's loop runs in Go and pulls tool calls out of the model's stream." width="100%">
+</p>
+
 | | Claude Code | MLX / Qwen3 |
 | --- | --- | --- |
 | Who owns the loop | Claude Code itself | our Go code (`internal/native`) |

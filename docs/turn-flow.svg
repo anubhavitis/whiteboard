@@ -1,14 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
   <title>How a turn flows: browser, Go server, and the two agents</title>
 
-  <rect x="0" y="0" width="1000" height="560" fill="#ffffff"/>
+  <!-- No background rect: the page shows through, so this reads correctly on
+       GitHub's light and dark themes and on anything else that embeds it.
+       Every colour below is chosen to hold contrast against BOTH a near-white and
+       a near-black page, which is why the greys sit mid-range rather than at the
+       comfortable extremes either theme alone would suggest. -->
 
   <defs>
     <marker id="a-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+      <path d="M0,0 L10,5 L0,10 z" fill="#8899ad"/>
     </marker>
     <marker id="a-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b5cf6"/>
     </marker>
     <marker id="a-dash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
@@ -16,12 +20,12 @@
   </defs>
 
   <!-- ============ process containers ============ -->
-  <g stroke="#cbd5e1" stroke-dasharray="5 4" fill="#f8fafc">
+  <g stroke="#94a3b8" stroke-dasharray="5 4" fill="#94a3b810">
     <rect x="24"  y="70" width="250" height="300" rx="8"/>
     <rect x="375" y="70" width="250" height="425" rx="8"/>
     <rect x="726" y="70" width="250" height="376" rx="8"/>
   </g>
-  <g font-size="12" font-weight="600" fill="#64748b" text-anchor="middle">
+  <g font-size="12" font-weight="600" fill="#8899ad" text-anchor="middle">
     <text x="149" y="90">browser</text>
     <text x="500" y="90">Go server :8787</text>
     <text x="851" y="90">agents · one per process</text>
@@ -29,14 +33,14 @@
 
   <!-- ============ nodes ============ -->
   <g stroke-width="1.5">
-    <rect x="54"  y="112" width="190" height="46" rx="6" fill="#eef2ff" stroke="#6366f1"/>
-    <rect x="54"  y="286" width="190" height="60" rx="6" fill="#f5f3ff" stroke="#7c3aed"/>
-    <rect x="405" y="112" width="190" height="46" rx="6" fill="#eef2ff" stroke="#6366f1"/>
-    <rect x="405" y="286" width="190" height="60" rx="6" fill="#f5f3ff" stroke="#7c3aed"/>
-    <rect x="405" y="408" width="190" height="60" rx="6" fill="#f5f3ff" stroke="#7c3aed"/>
-    <rect x="756" y="112" width="190" height="60" rx="6" fill="#eef2ff" stroke="#6366f1"/>
-    <rect x="756" y="286" width="190" height="70" rx="6" fill="#eef2ff" stroke="#6366f1"/>
-    <rect x="756" y="386" width="190" height="40" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+    <rect x="54"  y="112" width="190" height="46" rx="6" fill="#6366f120" stroke="#7c8cf8"/>
+    <rect x="54"  y="286" width="190" height="60" rx="6" fill="#7c3aed20" stroke="#8b5cf6"/>
+    <rect x="405" y="112" width="190" height="46" rx="6" fill="#6366f120" stroke="#7c8cf8"/>
+    <rect x="405" y="286" width="190" height="60" rx="6" fill="#7c3aed20" stroke="#8b5cf6"/>
+    <rect x="405" y="408" width="190" height="60" rx="6" fill="#7c3aed20" stroke="#8b5cf6"/>
+    <rect x="756" y="112" width="190" height="60" rx="6" fill="#6366f120" stroke="#7c8cf8"/>
+    <rect x="756" y="286" width="190" height="70" rx="6" fill="#6366f120" stroke="#7c8cf8"/>
+    <rect x="756" y="386" width="190" height="40" rx="6" fill="#94a3b818" stroke="#94a3b8"/>
   </g>
 
   <!-- Exactly one agent is live per process: WHITEBOARD_AGENT picks it at
@@ -46,7 +50,7 @@
     <text x="851" y="376">— or —</text>
   </g>
 
-  <g font-size="13.5" fill="#0f172a" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+  <g font-size="13.5" fill="#9aa7ba" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
     <text x="149" y="140">useAgentSocket</text>
     <text x="149" y="311">canvas/execute</text>
     <text x="500" y="140">ws/handler</text>
@@ -66,12 +70,12 @@
   </g>
 
   <!-- ============ chat path (grey) ============ -->
-  <g stroke="#475569" stroke-width="1.75" fill="none" marker-end="url(#a-grey)">
+  <g stroke="#8899ad" stroke-width="1.75" fill="none" marker-end="url(#a-grey)">
     <path d="M244,129 L399,129"/>
     <path d="M595,124 L750,124"/>
     <path d="M750,150 L599,150"/>
   </g>
-  <g font-size="11.5" fill="#334155" text-anchor="middle">
+  <g font-size="11.5" fill="#7d8ba1" text-anchor="middle">
     <text x="321" y="119">user_message</text>
     <text x="321" y="150">+ canvas JSON</text>
     <text x="672" y="114">SendTurn</text>
@@ -79,55 +83,55 @@
   </g>
 
   <!-- ============ MCP callback: agent -> mcp -> executor (violet) ============ -->
-  <g stroke="#7c3aed" stroke-width="1.75" fill="none" marker-end="url(#a-violet)">
+  <g stroke="#8b5cf6" stroke-width="1.75" fill="none" marker-end="url(#a-violet)">
     <path d="M851,172 L851,438 L601,438"/>
     <path d="M500,408 L500,352"/>
     <path d="M405,316 L250,316"/>
   </g>
-  <g font-size="11.5" fill="#5b21b6">
-    <text x="712" y="428" text-anchor="middle">JSON-RPC over HTTP</text>
+  <g font-size="11.5" fill="#8b5cf6">
+    <text x="690" y="452" text-anchor="end">JSON-RPC over HTTP</text>
     <text x="512" y="384">ToolExecutor</text>
     <text x="321" y="306" text-anchor="middle">tool_call</text>
   </g>
 
   <!-- ============ result path back to executor (violet) ============ -->
-  <g stroke="#7c3aed" stroke-width="1.75" fill="none" marker-end="url(#a-violet)">
+  <g stroke="#8b5cf6" stroke-width="1.75" fill="none" marker-end="url(#a-violet)">
     <path d="M250,340 L405,340"/>
   </g>
-  <g font-size="11.5" fill="#5b21b6" text-anchor="middle">
+  <g font-size="11.5" fill="#8b5cf6" text-anchor="middle">
     <text x="327" y="357">tool_result + shape ids</text>
   </g>
 
   <!-- ============ local-model path ============ -->
   <!-- Solid grey: built and verified. The request goes out and the SSE reply
        streams back to ws/handler, which is all internal/native does today. -->
-  <g stroke="#64748b" stroke-width="1.75" fill="none" marker-end="url(#a-grey)">
+  <g stroke="#8899ad" stroke-width="1.75" fill="none" marker-end="url(#a-grey)">
     <path d="M566,158 L566,212 L706,212 L706,296 L752,296"/>
     <path d="M752,322 L688,322 L688,232 L548,232 L548,162"/>
   </g>
-  <g font-size="11" fill="#334155">
-    <text x="718" y="256">POST /v1/chat/completions</text>
-    <text x="718" y="270">SSE deltas stream back</text>
+  <g font-size="11" fill="#7d8ba1">
+    <text x="700" y="252" text-anchor="end">POST /v1/chat/completions</text>
+    <text x="700" y="266" text-anchor="end">SSE deltas stream back</text>
   </g>
 
   <!-- The local model's tool path. Our Go code parses tool calls out of the SSE
        stream (native/turn.go) and dispatches them through the same ToolExecutor
        Claude Code reaches over MCP — which is why only the left edge differs. -->
-  <g stroke="#7c3aed" stroke-width="1.75" fill="none" marker-end="url(#a-violet)">
+  <g stroke="#8b5cf6" stroke-width="1.75" fill="none" marker-end="url(#a-violet)">
     <path d="M752,340 L700,340 L700,368 L598,368"/>
   </g>
-  <g font-size="10.5" fill="#5b21b6">
+  <g font-size="10.5" fill="#8b5cf6">
     <text x="606" y="386">tool calls parsed</text>
     <text x="606" y="399">out of the stream</text>
   </g>
 
   <!-- ============ legend ============ -->
   <g transform="translate(24,524)" font-size="11.5">
-    <line x1="0" y1="0" x2="26" y2="0" stroke="#475569" stroke-width="2"/>
-    <text x="34" y="4" fill="#334155">chat — built</text>
-    <line x1="128" y1="0" x2="154" y2="0" stroke="#7c3aed" stroke-width="2"/>
-    <text x="162" y="4" fill="#334155">drawing — built; the browser executes every tool</text>
-    <line x1="470" y1="0" x2="496" y2="0" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 4"/>
-    <text x="504" y="4" fill="#334155">process boundary</text>
+    <line x1="0" y1="0" x2="26" y2="0" stroke="#8899ad" stroke-width="2"/>
+    <text x="34" y="4" fill="#7d8ba1">chat — built</text>
+    <line x1="128" y1="0" x2="154" y2="0" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="162" y="4" fill="#7d8ba1">drawing — built; the browser executes every tool</text>
+    <line x1="470" y1="0" x2="496" y2="0" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="504" y="4" fill="#7d8ba1">process boundary</text>
   </g>
 </svg>

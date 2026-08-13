@@ -7,6 +7,10 @@ figures that go stale.
 
 ## Skills
 
+<p align="center">
+  <img src="skills.svg" alt="The core canvas skill plus any ticked optional skills are composed into one system prompt, given identically to both agents. A budget bar shows the core skill and tool schemas consuming part of the canvas token budget before the canvas is included." width="100%">
+</p>
+
 What an agent knows about the canvas is markdown, not a Go string:
 `server/internal/agent/canvas_skill.md`. Both agents receive it identically —
 Claude Code via `--append-system-prompt`, the native loop as a system message — so
@@ -37,6 +41,10 @@ Factories are shared across sessions, so applying a prompt returns a *copy*
 selection into every other tab.
 
 ## The model always guesses a new shape's id
+
+<p align="center">
+  <img src="tool-loop.svg" alt="One drawing turn: the model emits create_shape and create_arrow together, the arrow references an invented id and is rejected, the rejection tells the model the real id, and the retry succeeds." width="100%">
+</p>
 
 Measured on every drawing run, with both agents: asked to add a shape and connect
 it, the model emits `create_shape` and `create_arrow` in the *same* response, and

@@ -304,3 +304,64 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// Diagrams must work on a light page and a dark one. The first version of
+// turn-flow.svg painted an opaque white background, which read as a glaring slab in
+// dark mode and clashed with GitHub's off-white in light mode.
+//
+// The rule: no background fill, and no colour so light or so dark that it
+// disappears against one theme. Rather than police every hex value, this checks the
+// two mistakes that actually happened.
+func TestDiagramsAreThemeNeutral(t *testing.T) {
+	root := repoRoot(t)
+	svgs, err := filepath.Glob(filepath.Join(root, "docs", "*.svg"))
+	if err != nil || len(svgs) == 0 {
+		t.Fatalf("no diagrams found: %v", err)
+	}
+
+	// Near-white and near-black fills disappear against one theme or the other.
+	// Listed as whole attribute values so a translucent "#ffffff20" is allowed.
+	banned := []string{
+		`fill="#ffffff"`, `fill="#fff"`, `fill="white"`,
+		`fill="#000000"`, `fill="#000"`, `fill="black"`,
+		`fill="#0f172a"`, `fill="#f8fafc"`, `fill="#eef2ff"`,
+	}
+
+	for _, path := range svgs {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(b)
+		name := filepath.Base(path)
+
+		for _, bad := range banned {
+			if strings.Contains(body, bad) {
+				t.Errorf("%s uses %s, which vanishes or glares in one theme", name, bad)
+			}
+		}
+
+		// A full-canvas rect at the origin is a background, whatever its colour.
+		if regexp.MustCompile(`<rect x="0"\s+y="0"`).MatchString(body) {
+			t.Errorf("%s paints a full-canvas background rect; let the page show through", name)
+		}
+	}
+}
+
+// A diagram is only useful if it is reachable. Every SVG in docs/ should be
+// embedded somewhere, or it is dead weight nobody will maintain.
+func TestEveryDiagramIsReferenced(t *testing.T) {
+	root := repoRoot(t)
+	svgs, _ := filepath.Glob(filepath.Join(root, "docs", "*.svg"))
+
+	var allDocs string
+	for _, body := range trackedDocs(t) {
+		allDocs += body
+	}
+	for _, path := range svgs {
+		name := filepath.Base(path)
+		if !strings.Contains(allDocs, name) {
+			t.Errorf("%s is not referenced by any doc; either embed it or delete it", name)
+		}
+	}
+}
