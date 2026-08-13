@@ -16,6 +16,10 @@ export const AGENT_COLOR = "violet";
 const GEO_FOR_SHAPE: Record<string, string> = {
   box: "rectangle",
   ellipse: "ellipse",
+  // A flow chart needs a decision node. Without one the model has nothing that
+  // fits an if/else, and it would rather claim it drew a diamond than call a
+  // tool that cannot make one.
+  diamond: "diamond",
 };
 
 interface CreateShapeArgs {

@@ -734,3 +734,85 @@ func TestDistinctEndpointsStillPass(t *testing.T) {
 		t.Errorf("executor ran %d times, want 1", n)
 	}
 }
+
+// Claiming a change that never happened is worse than failing: the person has to
+// notice the canvas did not move. The loop nudges once, then says so plainly.
+func TestClaimedEditWithNoToolCallIsChallengedThenReported(t *testing.T) {
+	script := &scriptedServer{replies: []string{
+		textFrame("I've added a decision diamond labelled 'Is it green tea?'") + finishFrame("stop"),
+		textFrame("Added the diamond now.") + finishFrame("stop"),
+	}}
+	s, done := newToolSession(t, script, &fakeExecutor{})
+	defer done()
+
+	s.SendTurn(context.Background(), "add an if condition", nil)
+	d := drain(t, s)
+
+	if script.count() < 2 {
+		t.Fatalf("model was asked %d times; it should be nudged once", script.count())
+	}
+	// The nudge must be visible to the model as a user turn.
+	var nudged bool
+	for _, m := range messagesOf(t, script.body(1)) {
+		if m["role"] == "user" && strings.Contains(m["content"].(string), "did not call any") {
+			nudged = true
+		}
+	}
+	if !nudged {
+		t.Error("the model should be told its claim had no tool call behind it")
+	}
+	var reported bool
+	for _, e := range d.errors {
+		if strings.Contains(e, "never made") {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Errorf("the user must be told the canvas is unchanged; errors = %v", d.errors)
+	}
+}
+
+// A plain answer must not trip the claim detector.
+func TestPlainAnswerIsNotChallenged(t *testing.T) {
+	script := &scriptedServer{replies: []string{
+		textFrame("The canvas shows a seven-step tea flow. Nothing is missing.") + finishFrame("stop"),
+	}}
+	s, done := newToolSession(t, script, &fakeExecutor{})
+	defer done()
+
+	s.SendTurn(context.Background(), "what is on my canvas?", nil)
+	d := drain(t, s)
+
+	if script.count() != 1 {
+		t.Errorf("model was asked %d times; a plain answer needs no nudge", script.count())
+	}
+	if len(d.errors) != 0 {
+		t.Errorf("unexpected errors on a plain answer: %v", d.errors)
+	}
+}
+
+// Suggesting a change ("I can add…") is not claiming one.
+func TestSuggestionIsNotAClaim(t *testing.T) {
+	for _, s := range []string{
+		"I can add a decision diamond if you like.",
+		"You could connect the two boxes.",
+		"Adding a diamond would make the branch clearer.",
+	} {
+		if claimsAnEdit(s) {
+			t.Errorf("false positive on a suggestion: %q", s)
+		}
+	}
+}
+
+func TestPastTenseClaimsAreDetected(t *testing.T) {
+	for _, s := range []string{
+		"I've added a diamond.",
+		"Added the decision node after Boil water.",
+		"I connected the two branches.",
+		"I have removed the old box.",
+	} {
+		if !claimsAnEdit(s) {
+			t.Errorf("missed a claim: %q", s)
+		}
+	}
+}

@@ -28,6 +28,36 @@ type turn struct {
 	madeIDs []string
 	// redactor keeps shape ids out of the text the person reads.
 	redactor idRedactor
+	// nudged records that the model has already been told once that it claimed a
+	// change without making it, so the loop cannot ping-pong forever.
+	nudged bool
+}
+
+// editClaims are past-tense phrasings the model uses when it believes it changed
+// the canvas. Deliberately narrow: matching "I can add a box" or "you could
+// connect them" would nag on perfectly good answers, so only completed-action
+// wording counts.
+var editClaims = []string{
+	"i've added", "i have added", "i added",
+	"i've created", "i have created", "i created",
+	"i've connected", "i have connected", "i connected",
+	"i've removed", "i have removed", "i removed",
+	"i've deleted", "i have deleted", "i deleted",
+	"i've renamed", "i have renamed", "i renamed",
+	"i've updated", "i have updated", "i updated",
+	"added a", "added the", "created a", "created the",
+	"removed the", "deleted the", "renamed the", "connected the",
+}
+
+// claimsAnEdit reports whether text asserts a canvas change was completed.
+func claimsAnEdit(text string) bool {
+	low := strings.ToLower(text)
+	for _, c := range editClaims {
+		if strings.Contains(low, c) {
+			return true
+		}
+	}
+	return false
 }
 
 // emitText streams assistant text to the UI with shape ids stripped.
@@ -114,6 +144,28 @@ func (t *turn) run(ctx context.Context) {
 				t.sess.emit(agent.AgentEvent{
 					Type: agent.EventError,
 					Text: "the local model spent its whole response thinking and never answered — try a shorter question",
+				})
+			}
+			// The model sometimes narrates a change it never made — "Added a
+			// decision diamond…" with no tool call behind it. Claiming work that
+			// did not happen is worse than failing, because the person has to
+			// notice the canvas did not move. Give it one chance to actually do it,
+			// then say plainly that nothing changed.
+			if t.calls == 0 && claimsAnEdit(res.Text) {
+				if !t.nudged {
+					t.nudged = true
+					t.sess.log.Warn("native: model claimed an edit with no tool call; nudging")
+					t.convo = append(t.convo,
+						message{Role: "assistant", Content: res.Text},
+						message{Role: "user", Content: "You described a change but did not call any " +
+							"tool, so the canvas is unchanged. Either make the change now with the " +
+							"tools, or say plainly that you cannot and why."})
+					continue
+				}
+				t.sess.emit(agent.AgentEvent{
+					Type: agent.EventError,
+					Text: "the model described a change it never made — the canvas is unchanged. " +
+						"Try asking for one smaller step, or switch to Claude Code for this.",
 				})
 			}
 			t.commit(lastText)

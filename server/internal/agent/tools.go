@@ -48,9 +48,11 @@ func Tools() []Tool {
 				Type: "object",
 				Properties: map[string]Property{
 					"shape": {
-						Type:        "string",
-						Description: "The kind of shape to draw.",
-						Enum:        []string{"box", "ellipse", "text"},
+						Type: "string",
+						Description: "The kind of shape to draw. Use `diamond` for a decision " +
+							"or if/else point in a flow chart, `ellipse` for a start or end, " +
+							"`box` for a step, `text` for a bare label.",
+						Enum: []string{"box", "ellipse", "diamond", "text"},
 					},
 					"text": {
 						Type:        "string",
