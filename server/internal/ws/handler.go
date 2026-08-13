@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -24,8 +25,17 @@ type Handler struct {
 	// factories are the agents the UI may switch between, in dropdown order.
 	// The first is the default for a new session.
 	factories []agent.Factory
-	log       *slog.Logger
-	origins   []string
+	// skills is optional: without it the agent gets the core canvas skill only,
+	// which is exactly the behaviour before skills existed.
+	skills  *agent.SkillStore
+	log     *slog.Logger
+	origins []string
+}
+
+// WithSkills attaches a skill store, enabling the picker.
+func (h *Handler) WithSkills(store *agent.SkillStore) *Handler {
+	h.skills = store
+	return h
 }
 
 func NewHandler(factory agent.Factory, log *slog.Logger, allowedOrigins []string) *Handler {
@@ -76,9 +86,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("session opened", "session", sessionID, "remote", r.RemoteAddr)
 	defer h.log.Info("session closed", "session", sessionID)
 
-	// The agent subprocess starts with the socket and dies with it.
+	// The agent subprocess starts with the socket and dies with it. It is built
+	// with this session's prompt, which starts as core-skill-only.
 	current := h.factories[0]
-	agentSession, err := current.New(r.Context(), sessionID, s.executor)
+	built := current
+	if pc, ok := current.(agent.PromptCustomiser); ok {
+		built = pc.WithPrompt(h.promptFor(s))
+	}
+	agentSession, err := built.New(r.Context(), sessionID, s.executor)
 	if err != nil {
 		h.log.Error("agent start failed", "err", err, "session", sessionID)
 		s.SendError(r.Context(), "could not start the agent: "+err.Error())
@@ -99,6 +114,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Current: current.Name(),
 	}); err != nil {
 		h.log.Warn("could not send agent list", "err", err, "session", sessionID)
+	}
+
+	// Skill state follows the agent list, so the picker renders on connect.
+	if err := h.sendSkills(r.Context(), s); err != nil {
+		h.log.Warn("could not send skills", "err", err, "session", sessionID)
 	}
 
 	if err := h.pump(r.Context(), s); err != nil {
@@ -235,6 +255,71 @@ func (h *Handler) dispatch(ctx context.Context, s *session, env Envelope) error 
 		}
 		return s.SendTurnEnd(ctx)
 
+	case TypeSetSkills:
+		var msg SetSkills
+		if err := json.Unmarshal(env.Payload, &msg); err != nil {
+			return s.SendError(ctx, "malformed set_skills payload")
+		}
+		s.setSkills(msg.Enabled)
+		// Changing skills changes the system prompt, and a prompt is fixed when a
+		// session starts — so the agent has to be rebuilt. Doing it here rather
+		// than on the next turn keeps "what the UI shows" and "what the agent
+		// knows" in step.
+		if err := h.rebuildAgent(ctx, s); err != nil {
+			return s.SendError(ctx, err.Error())
+		}
+		h.log.Info("skills set", "session", s.id, "enabled", msg.Enabled)
+		return h.sendSkills(ctx, s)
+
+	case TypeSaveSkill:
+		if h.skills == nil {
+			return s.SendError(ctx, "skills are not enabled on this server")
+		}
+		var msg SaveSkill
+		if err := json.Unmarshal(env.Payload, &msg); err != nil {
+			return s.SendError(ctx, "malformed save_skill payload")
+		}
+		if err := h.skills.Save(msg.ID, msg.Body); err != nil {
+			return s.SendError(ctx, "could not save the skill: "+err.Error())
+		}
+		h.log.Info("skill saved", "session", s.id, "skill", msg.ID)
+		// A skill that was already enabled has new text, so the prompt changed.
+		for _, id := range s.skills() {
+			if id == msg.ID {
+				if err := h.rebuildAgent(ctx, s); err != nil {
+					return s.SendError(ctx, err.Error())
+				}
+				break
+			}
+		}
+		return h.sendSkills(ctx, s)
+
+	case TypeDeleteSkill:
+		if h.skills == nil {
+			return s.SendError(ctx, "skills are not enabled on this server")
+		}
+		var msg DeleteSkill
+		if err := json.Unmarshal(env.Payload, &msg); err != nil {
+			return s.SendError(ctx, "malformed delete_skill payload")
+		}
+		if err := h.skills.Delete(msg.ID); err != nil {
+			return s.SendError(ctx, "could not delete the skill: "+err.Error())
+		}
+		// Drop it from this session's selection too, or the prompt would keep
+		// citing a skill that no longer exists.
+		kept := []string{}
+		for _, id := range s.skills() {
+			if id != msg.ID {
+				kept = append(kept, id)
+			}
+		}
+		s.setSkills(kept)
+		if err := h.rebuildAgent(ctx, s); err != nil {
+			return s.SendError(ctx, err.Error())
+		}
+		h.log.Info("skill deleted", "session", s.id, "skill", msg.ID)
+		return h.sendSkills(ctx, s)
+
 	case TypeSwitchAgent:
 		var msg SwitchAgent
 		if err := json.Unmarshal(env.Payload, &msg); err != nil {
@@ -249,6 +334,11 @@ func (h *Handler) dispatch(ctx context.Context, s *session, env Envelope) error 
 			return s.SendError(ctx, "unknown agent: "+msg.Name)
 		}
 
+		// Carry this session's skills across the switch; otherwise picking a
+		// different agent would silently drop them.
+		if pc, ok := f.(agent.PromptCustomiser); ok {
+			f = pc.WithPrompt(h.promptFor(s))
+		}
 		next, err := f.New(ctx, s.id, s.executor)
 		if err != nil {
 			h.log.Error("agent switch failed", "err", err, "session", s.id, "to", msg.Name)
@@ -297,6 +387,23 @@ type session struct {
 	agentMu   sync.Mutex
 	agent     agent.AgentSession
 	agentName string
+
+	// skillMu guards this session's enabled skills. They are per-session so two
+	// tabs can run different skill sets against the same server.
+	skillMu       sync.Mutex
+	enabledSkills []string
+}
+
+func (s *session) setSkills(ids []string) {
+	s.skillMu.Lock()
+	defer s.skillMu.Unlock()
+	s.enabledSkills = append([]string(nil), ids...)
+}
+
+func (s *session) skills() []string {
+	s.skillMu.Lock()
+	defer s.skillMu.Unlock()
+	return append([]string(nil), s.enabledSkills...)
 }
 
 func (s *session) setAgent(as agent.AgentSession, name string) {
@@ -360,4 +467,70 @@ func (s *session) send(ctx context.Context, env Envelope) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	return s.conn.Write(ctx, websocket.MessageText, data)
+}
+
+// promptFor builds this session's system prompt from its enabled skills. Without
+// a skill store the agent gets the core canvas skill, unchanged from before
+// skills existed.
+func (h *Handler) promptFor(s *session) string {
+	if h.skills == nil {
+		return agent.SystemPrompt
+	}
+	return agent.ComposePrompt(h.skills.Compose(s.skills()))
+}
+
+// rebuildAgent replaces this session's agent with one built from the current
+// prompt, keeping the same factory.
+//
+// A system prompt is fixed when a session starts, so a skill change cannot take
+// effect any other way. The new agent starts with no history — the same trade-off
+// as switching agents, and the UI says so.
+func (h *Handler) rebuildAgent(ctx context.Context, s *session) error {
+	_, name := s.takeAgent()
+	f := h.factoryNamed(name)
+	if f == nil {
+		return fmt.Errorf("no agent named %q", name)
+	}
+	if pc, ok := f.(agent.PromptCustomiser); ok {
+		f = pc.WithPrompt(h.promptFor(s))
+	} else {
+		// A factory that cannot take a prompt (the echo agent) has nothing to
+		// rebuild for: its behaviour does not depend on skills.
+		return nil
+	}
+
+	next, err := f.New(ctx, s.id, s.executor)
+	if err != nil {
+		return fmt.Errorf("could not restart %s with the new skills: %w", name, err)
+	}
+	s.closeAgent()
+	s.setAgent(next, name)
+	go h.forwardEvents(ctx, s, next)
+	return nil
+}
+
+// sendSkills pushes the whole picker state, so the UI never has to reconstruct it.
+func (h *Handler) sendSkills(ctx context.Context, s *session) error {
+	if h.skills == nil {
+		return nil
+	}
+	all := h.skills.List()
+	infos := make([]SkillInfo, 0, len(all))
+	for _, sk := range all {
+		infos = append(infos, SkillInfo{
+			ID:          sk.ID,
+			Name:        sk.Name,
+			Description: sk.Description,
+			BuiltIn:     sk.BuiltIn,
+			Tokens:      sk.Tokens,
+			Body:        sk.Body,
+		})
+	}
+	return s.sendTyped(ctx, TypeSkillsState, SkillsState{
+		Skills:  infos,
+		Enabled: s.skills(),
+		// ~4 chars per token, the same rule the frontend uses for the canvas.
+		PromptTokens: (len(h.promptFor(s)) + 3) / 4,
+		CanvasBudget: 8000,
+	})
 }

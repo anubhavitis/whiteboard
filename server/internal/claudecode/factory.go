@@ -22,6 +22,14 @@ func NewFactory(mcp *MCPServer, baseURL, systemPrompt string, log *slog.Logger) 
 
 func (f *Factory) Name() string { return "claude-code" }
 
+// WithPrompt returns a copy of this factory that appends the given system prompt,
+// so a per-session skill selection cannot leak between sessions.
+func (f *Factory) WithPrompt(prompt string) agent.Factory {
+	copy := *f
+	copy.prompt = prompt
+	return &copy
+}
+
 func (f *Factory) New(ctx context.Context, sessionID string, exec agent.ToolExecutor) (agent.AgentSession, error) {
 	// Register before starting the subprocess: Claude Code connects to the MCP
 	// endpoint during init, and an unregistered session would reject the first

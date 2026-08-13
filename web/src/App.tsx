@@ -26,9 +26,13 @@ export default function App() {
     error,
     agents,
     agent,
+    skills,
     sendMessage,
     cancel,
     switchAgent,
+    setEnabledSkills,
+    saveSkill,
+    deleteSkill,
     handleServerMessage,
   } = useChat({
     send,
@@ -53,9 +57,13 @@ export default function App() {
         status={status}
         agents={agents}
         agent={agent}
+        skills={skills}
         onSend={sendMessage}
         onCancel={cancel}
         onSwitchAgent={switchAgent}
+        onSetSkills={setEnabledSkills}
+        onSaveSkill={saveSkill}
+        onDeleteSkill={deleteSkill}
       />
     </div>
   );

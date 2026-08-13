@@ -2,7 +2,12 @@ import { useCallback, useRef, useState } from "react";
 import type { Editor } from "tldraw";
 import { serializeCanvas } from "../canvas/serialize";
 import { executeToolCall } from "../canvas/execute";
-import type { ClientMessage, ServerMessage, ToolResult } from "./protocol";
+import type {
+  ClientMessage,
+  ServerMessage,
+  SkillsState,
+  ToolResult,
+} from "./protocol";
 import { appendOnce, dropEmpty, upsertMessage } from "./transcript";
 
 export interface ChatMessage {
@@ -32,6 +37,9 @@ export function useChat({ send, editorRef }: Options) {
   // The dropdown is built from what the server offers, not a hardcoded list.
   const [agents, setAgents] = useState<string[]>([]);
   const [agent, setAgent] = useState<string | null>(null);
+  // Pushed whole by the server, never reconstructed here, so the picker cannot
+  // disagree with what the agent was actually built with.
+  const [skills, setSkills] = useState<SkillsState | null>(null);
 
   // The id of the assistant message currently being streamed into.
   const activeId = useRef<string | null>(null);
@@ -103,6 +111,9 @@ export function useChat({ send, editorRef }: Options) {
           setAgents(msg.payload.names);
           setAgent(msg.payload.current);
           break;
+        case "skills_state":
+          setSkills(msg.payload);
+          break;
         case "agent_switched": {
           setAgent(msg.payload.current);
           endStream();
@@ -173,15 +184,43 @@ export function useChat({ send, editorRef }: Options) {
     [send, streaming, agent],
   );
 
+  // Changing skills restarts the agent with a new system prompt, so it is
+  // blocked mid-turn for the same reason switching agents is.
+  const setEnabledSkills = useCallback(
+    (enabled: string[]) => {
+      if (streaming) return;
+      send({ type: "set_skills", payload: { enabled } });
+    },
+    [send, streaming],
+  );
+
+  const saveSkill = useCallback(
+    (id: string, body: string) => {
+      send({ type: "save_skill", payload: { id, body } });
+    },
+    [send],
+  );
+
+  const deleteSkill = useCallback(
+    (id: string) => {
+      send({ type: "delete_skill", payload: { id } });
+    },
+    [send],
+  );
+
   return {
     messages,
     streaming,
     error,
     agents,
     agent,
+    skills,
     sendMessage,
     cancel,
     switchAgent,
+    setEnabledSkills,
+    saveSkill,
+    deleteSkill,
     handleServerMessage,
   };
 }

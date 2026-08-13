@@ -6,6 +6,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -491,5 +494,314 @@ func TestSwitchToSameAgentDoesNotRestartIt(t *testing.T) {
 	}
 	if after := alpha.builds(); after != before {
 		t.Errorf("alpha rebuilt %d -> %d; a same-agent switch should be a no-op", before, after)
+	}
+}
+
+// promptFactory records the prompt each session was built with, so a test can
+// prove a skill change actually reached the agent.
+type promptFactory struct {
+	name string
+	mu   sync.Mutex
+	seen []string
+}
+
+func (f *promptFactory) Name() string { return f.name }
+
+func (f *promptFactory) WithPrompt(p string) agent.Factory {
+	return &promptChild{parent: f, prompt: p, name: f.name}
+}
+
+func (f *promptFactory) New(_ context.Context, _ string, _ agent.ToolExecutor) (agent.AgentSession, error) {
+	return newNamedSession(f.name), nil
+}
+
+func (f *promptFactory) prompts() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.seen...)
+}
+
+type promptChild struct {
+	parent *promptFactory
+	prompt string
+	name   string
+}
+
+func (c *promptChild) Name() string { return c.name }
+
+func (c *promptChild) WithPrompt(p string) agent.Factory {
+	return &promptChild{parent: c.parent, prompt: p, name: c.name}
+}
+
+func (c *promptChild) New(_ context.Context, _ string, _ agent.ToolExecutor) (agent.AgentSession, error) {
+	c.parent.mu.Lock()
+	c.parent.seen = append(c.parent.seen, c.prompt)
+	c.parent.mu.Unlock()
+	return newNamedSession(c.name), nil
+}
+
+func newNamedSession(name string) *namedSession {
+	return &namedSession{
+		name:   name,
+		events: make(chan agent.AgentEvent, 8),
+		closed: make(chan struct{}),
+	}
+}
+
+func skillHandler(t *testing.T) (*Handler, *promptFactory, string) {
+	t.Helper()
+	dir := t.TempDir()
+	store, err := agent.NewSkillStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &promptFactory{name: "alpha"}
+	h := NewHandlerWithAgents([]agent.Factory{f}, quiet(), []string{"*"}).WithSkills(store)
+	return h, f, dir
+}
+
+func readUntil(t *testing.T, conn *websocket.Conn, want string) Envelope {
+	t.Helper()
+	for i := 0; i < 10; i++ {
+		env := readEnvelope(t, conn)
+		if env.Type == want {
+			return env
+		}
+	}
+	t.Fatalf("never saw a %q frame", want)
+	return Envelope{}
+}
+
+func TestSkillsStateSentOnConnect(t *testing.T) {
+	h, _, _ := skillHandler(t)
+	conn, done := dialTest(t, h)
+	defer done()
+
+	env := readUntil(t, conn, TypeSkillsState)
+	var st SkillsState
+	if err := json.Unmarshal(env.Payload, &st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Skills) == 0 {
+		t.Error("no skills offered")
+	}
+	if len(st.Enabled) != 0 {
+		t.Errorf("a new session should start with no optional skills, got %v", st.Enabled)
+	}
+	if st.PromptTokens == 0 || st.CanvasBudget == 0 {
+		t.Error("token costs should be reported so the picker can show them")
+	}
+	for _, sk := range st.Skills {
+		if sk.Name == "" || sk.Description == "" {
+			t.Errorf("%s is missing display metadata", sk.ID)
+		}
+	}
+}
+
+// The point of the feature: enabling a skill changes what the agent is told.
+func TestEnablingASkillChangesTheAgentPrompt(t *testing.T) {
+	h, f, _ := skillHandler(t)
+	conn, done := dialTest(t, h)
+	defer done()
+	readUntil(t, conn, TypeSkillsState)
+
+	before := f.prompts()
+	if len(before) == 0 {
+		t.Fatal("the initial session was not built through WithPrompt")
+	}
+	if strings.Contains(before[0], "Flow chart conventions") {
+		t.Fatal("an unselected skill is already in the prompt")
+	}
+
+	writeJSON(t, conn, map[string]any{
+		"type": TypeSetSkills, "payload": map[string]any{"enabled": []string{"flowcharts"}},
+	})
+	readUntil(t, conn, TypeSkillsState)
+
+	after := f.prompts()
+	if len(after) <= len(before) {
+		t.Fatal("the agent was not rebuilt after a skill change")
+	}
+	latest := after[len(after)-1]
+	if !strings.Contains(latest, "Flow chart conventions") {
+		t.Error("the enabled skill did not reach the agent's prompt")
+	}
+	// The core skill must survive alongside it.
+	if !strings.Contains(latest, "never emit pixels") {
+		t.Error("the core canvas skill was lost when a skill was enabled")
+	}
+}
+
+func TestDisablingASkillRemovesItFromThePrompt(t *testing.T) {
+	h, f, _ := skillHandler(t)
+	conn, done := dialTest(t, h)
+	defer done()
+	readUntil(t, conn, TypeSkillsState)
+
+	writeJSON(t, conn, map[string]any{
+		"type": TypeSetSkills, "payload": map[string]any{"enabled": []string{"flowcharts"}},
+	})
+	readUntil(t, conn, TypeSkillsState)
+	writeJSON(t, conn, map[string]any{
+		"type": TypeSetSkills, "payload": map[string]any{"enabled": []string{}},
+	})
+	readUntil(t, conn, TypeSkillsState)
+
+	latest := f.prompts()[len(f.prompts())-1]
+	if strings.Contains(latest, "Flow chart conventions") {
+		t.Error("a disabled skill is still in the prompt")
+	}
+	if !strings.Contains(latest, "never emit pixels") {
+		t.Error("the core skill should always remain")
+	}
+}
+
+func TestSaveAndDeleteSkillOverTheWire(t *testing.T) {
+	h, _, dir := skillHandler(t)
+	conn, done := dialTest(t, h)
+	defer done()
+	readUntil(t, conn, TypeSkillsState)
+
+	writeJSON(t, conn, map[string]any{
+		"type": TypeSaveSkill,
+		"payload": map[string]any{
+			"id":   "terse",
+			"body": "# Terse\n\nOne sentence answers only.",
+		},
+	})
+	env := readUntil(t, conn, TypeSkillsState)
+	var st SkillsState
+	json.Unmarshal(env.Payload, &st)
+
+	var found *SkillInfo
+	for i := range st.Skills {
+		if st.Skills[i].ID == "terse" {
+			found = &st.Skills[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("the saved skill is not in the state")
+	}
+	if found.BuiltIn {
+		t.Error("a user skill must not be marked built in")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "terse.md")); err != nil {
+		t.Errorf("the skill was not written to disk: %v", err)
+	}
+
+	writeJSON(t, conn, map[string]any{
+		"type": TypeDeleteSkill, "payload": map[string]any{"id": "terse"},
+	})
+	env = readUntil(t, conn, TypeSkillsState)
+	json.Unmarshal(env.Payload, &st)
+	for _, sk := range st.Skills {
+		if sk.ID == "terse" {
+			t.Error("the deleted skill is still listed")
+		}
+	}
+}
+
+// Deleting an enabled skill must drop it from the selection too, or the prompt
+// would keep citing something that no longer exists.
+func TestDeletingAnEnabledSkillDisablesIt(t *testing.T) {
+	h, f, _ := skillHandler(t)
+	conn, done := dialTest(t, h)
+	defer done()
+	readUntil(t, conn, TypeSkillsState)
+
+	writeJSON(t, conn, map[string]any{
+		"type":    TypeSaveSkill,
+		"payload": map[string]any{"id": "temp", "body": "# Temp\n\nMARKER-TEXT here."},
+	})
+	readUntil(t, conn, TypeSkillsState)
+	writeJSON(t, conn, map[string]any{
+		"type": TypeSetSkills, "payload": map[string]any{"enabled": []string{"temp"}},
+	})
+	readUntil(t, conn, TypeSkillsState)
+	if !strings.Contains(f.prompts()[len(f.prompts())-1], "MARKER-TEXT") {
+		t.Fatal("the skill never reached the prompt")
+	}
+
+	writeJSON(t, conn, map[string]any{
+		"type": TypeDeleteSkill, "payload": map[string]any{"id": "temp"},
+	})
+	env := readUntil(t, conn, TypeSkillsState)
+	var st SkillsState
+	json.Unmarshal(env.Payload, &st)
+	for _, id := range st.Enabled {
+		if id == "temp" {
+			t.Error("the deleted skill is still enabled")
+		}
+	}
+	if strings.Contains(f.prompts()[len(f.prompts())-1], "MARKER-TEXT") {
+		t.Error("the deleted skill is still in the prompt")
+	}
+}
+
+func TestBuiltInCannotBeOverwrittenOverTheWire(t *testing.T) {
+	h, _, _ := skillHandler(t)
+	conn, done := dialTest(t, h)
+	defer done()
+	readUntil(t, conn, TypeSkillsState)
+
+	writeJSON(t, conn, map[string]any{
+		"type":    TypeSaveSkill,
+		"payload": map[string]any{"id": "flowcharts", "body": "# Hijacked\n\nnope"},
+	})
+	if env := readUntil(t, conn, TypeError); env.Type != TypeError {
+		t.Error("overwriting a built-in should be refused")
+	}
+}
+
+// Skills must survive an agent switch, or picking a different model silently
+// resets them.
+func TestSkillsSurviveAnAgentSwitch(t *testing.T) {
+	dir := t.TempDir()
+	store, err := agent.NewSkillStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &promptFactory{name: "alpha"}
+	b := &promptFactory{name: "beta"}
+	h := NewHandlerWithAgents([]agent.Factory{a, b}, quiet(), []string{"*"}).WithSkills(store)
+
+	conn, done := dialTest(t, h)
+	defer done()
+	readUntil(t, conn, TypeSkillsState)
+
+	writeJSON(t, conn, map[string]any{
+		"type": TypeSetSkills, "payload": map[string]any{"enabled": []string{"flowcharts"}},
+	})
+	readUntil(t, conn, TypeSkillsState)
+
+	writeJSON(t, conn, map[string]any{
+		"type": TypeSwitchAgent, "payload": map[string]any{"name": "beta"},
+	})
+	readUntil(t, conn, TypeAgentSwitched)
+
+	got := b.prompts()
+	if len(got) == 0 {
+		t.Fatal("beta was never built with a prompt")
+	}
+	if !strings.Contains(got[len(got)-1], "Flow chart conventions") {
+		t.Error("the skill selection did not carry across the agent switch")
+	}
+}
+
+// Without a skill store the handler must behave exactly as it did before skills
+// existed: no skills_state frame, and set_skills does not break the session.
+func TestNoSkillStoreStillWorks(t *testing.T) {
+	f := &promptFactory{name: "alpha"}
+	h := NewHandlerWithAgents([]agent.Factory{f}, quiet(), []string{"*"})
+	conn, done := dialTest(t, h)
+	defer done()
+
+	readUntil(t, conn, TypeAgentsAvailable)
+	writeJSON(t, conn, map[string]any{
+		"type": TypeSetSkills, "payload": map[string]any{"enabled": []string{"flowcharts"}},
+	})
+	// The session must still answer a turn afterwards.
+	if got := turnText(t, conn); got != "from:alpha" {
+		t.Errorf("session broken after set_skills with no store: %q", got)
 	}
 }

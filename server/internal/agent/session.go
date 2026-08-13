@@ -107,3 +107,13 @@ type Factory interface {
 	// Name is the value the dropdown sends.
 	Name() string
 }
+
+// PromptCustomiser is an optional Factory capability: returning a copy of itself
+// that builds sessions with a different system prompt.
+//
+// It returns a COPY rather than mutating, because one Factory is shared by every
+// session in the process — mutating it would leak one browser tab's skill
+// selection into every other.
+type PromptCustomiser interface {
+	WithPrompt(prompt string) Factory
+}

@@ -21,6 +21,26 @@ var canvasSkill embed.FS
 // as its system message. One source, so the two can never drift.
 var CanvasSkill = mustRead("canvas_skill.md")
 
+// RolePreamble and VoiceGuidance bracket the skills in a composed prompt. They
+// are separate from the skill text so a session can swap which skills apply
+// without rebuilding the parts that never change.
+const RolePreamble = `You are a thinking partner working alongside someone on an infinite whiteboard canvas.`
+
+const VoiceGuidance = `## How to talk
+
+Keep answers short. Two or three sentences of prose for an ordinary question. Reach for a list only when the person asked for one or the canvas genuinely holds a list of things; never nest bullets inside bullets, and never enumerate shapes one by one when a sentence covers it — "a seven-step tea flow, plus two unlabelled boxes off to the side" beats seven bullet points.
+
+Be direct and concrete. When you see a gap, a missing dependency, or a contradiction, say it plainly and say why. Skip the preamble: no "Great question!", no restating what they drew. If the canvas is empty, say so and ask what they want to think through.`
+
+// ComposePrompt builds the full system prompt for a session: role, then the
+// canvas skill plus whichever optional skills are enabled, then voice.
+//
+// skills is the already-composed skill text (see SkillStore.Compose), which
+// always begins with the core canvas skill.
+func ComposePrompt(skills string) string {
+	return strings.Join([]string{RolePreamble, skills, VoiceGuidance}, "\n\n")
+}
+
 // SystemPrompt is what an agent is actually given: who it is, then the canvas
 // skill, then how to talk.
 //
@@ -33,15 +53,7 @@ var CanvasSkill = mustRead("canvas_skill.md")
 // budget of 8,000. Anything added here is taken away from the canvas, which is
 // the part carrying the actual information. Prefer sharpening a rule to adding
 // one.
-var SystemPrompt = strings.Join([]string{
-	`You are a thinking partner working alongside someone on an infinite whiteboard canvas.`,
-	CanvasSkill,
-	`## How to talk
-
-Keep answers short. Two or three sentences of prose for an ordinary question. Reach for a list only when the person asked for one or the canvas genuinely holds a list of things; never nest bullets inside bullets, and never enumerate shapes one by one when a sentence covers it — "a seven-step tea flow, plus two unlabelled boxes off to the side" beats seven bullet points.
-
-Be direct and concrete. When you see a gap, a missing dependency, or a contradiction, say it plainly and say why. Skip the preamble: no "Great question!", no restating what they drew. If the canvas is empty, say so and ask what they want to think through.`,
-}, "\n\n")
+var SystemPrompt = ComposePrompt(CanvasSkill)
 
 func mustRead(name string) string {
 	b, err := canvasSkill.ReadFile(name)

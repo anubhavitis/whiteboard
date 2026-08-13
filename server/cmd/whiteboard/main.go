@@ -36,7 +36,18 @@ func main() {
 	// (planv2.md §1.2).
 	factories := availableAgents(env("WHITEBOARD_AGENT", ""), mcp, mcpBase, log)
 
-	handler := ws.NewHandlerWithAgents(factories, log, origins)
+	// User skills live outside the repository on purpose: they are one person's
+	// notes on how they want their agent to behave, not project source. The
+	// directory is gitignored and created on first save.
+	skillDir := env("WHITEBOARD_SKILLS_DIR", "skills")
+	skills, err := agent.NewSkillStore(skillDir)
+	if err != nil {
+		log.Error("could not load skills", "err", err, "dir", skillDir)
+		os.Exit(1)
+	}
+	log.Info("skills loaded", "dir", skillDir, "count", len(skills.List()))
+
+	handler := ws.NewHandlerWithAgents(factories, log, origins).WithSkills(skills)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           httpapi.Router(handler, mcp),

@@ -47,6 +47,14 @@ func NewFactory(baseURL, model, prompt string, log *slog.Logger) *Factory {
 	return &Factory{BaseURL: baseURL, Model: model, Prompt: prompt, Log: log, Timeout: 5 * time.Minute}
 }
 
+// WithPrompt returns a copy of this factory that builds sessions with the given
+// system prompt, so a per-session skill selection cannot leak between sessions.
+func (f *Factory) WithPrompt(prompt string) agent.Factory {
+	copy := *f
+	copy.Prompt = prompt
+	return &copy
+}
+
 // Name is the value the chat panel's dropdown sends.
 func (f *Factory) Name() string { return "local" }
 

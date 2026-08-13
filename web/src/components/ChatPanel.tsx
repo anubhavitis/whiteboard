@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../agent/useChat";
-import type { ConnectionStatus } from "../agent/protocol";
+import type { ConnectionStatus, SkillsState } from "../agent/protocol";
+import { SkillsPanel } from "./SkillsPanel";
 import { ConnectionDot } from "./ConnectionDot";
 
 interface Props {
@@ -10,9 +11,13 @@ interface Props {
   status: ConnectionStatus;
   agents: string[];
   agent: string | null;
+  skills: SkillsState | null;
   onSend: (text: string) => void;
   onCancel: () => void;
   onSwitchAgent: (name: string) => void;
+  onSetSkills: (enabled: string[]) => void;
+  onSaveSkill: (id: string, body: string) => void;
+  onDeleteSkill: (id: string) => void;
 }
 
 /** What each agent is, for the dropdown. Unknown names fall back to the name. */
@@ -29,9 +34,13 @@ export function ChatPanel({
   status,
   agents,
   agent,
+  skills,
   onSend,
   onCancel,
   onSwitchAgent,
+  onSetSkills,
+  onSaveSkill,
+  onDeleteSkill,
 }: Props) {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -73,6 +82,16 @@ export function ChatPanel({
             ))}
           </select>
         </div>
+      )}
+
+      {skills && (
+        <SkillsPanel
+          skills={skills}
+          disabled={streaming}
+          onToggle={onSetSkills}
+          onSave={onSaveSkill}
+          onDelete={onDeleteSkill}
+        />
       )}
 
       <div className="chat__messages" ref={listRef}>
