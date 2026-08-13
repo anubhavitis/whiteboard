@@ -47,6 +47,10 @@ export default function App() {
           persistenceKey="whiteboard-partner"
           onMount={(editor) => {
             editorRef.current = editor;
+            // Grid on by default. tldraw treats isGridMode as temporary state and
+            // does not persist it, so it has to be set on every mount rather than
+            // once — and a user who turns it off will see it back next reload.
+            editor.updateInstanceState({ isGridMode: true });
           }}
         />
       </div>
