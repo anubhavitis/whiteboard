@@ -3,7 +3,7 @@ import type { Editor } from "tldraw";
 import { serializeCanvas } from "../canvas/serialize";
 import { executeToolCall } from "../canvas/execute";
 import type { ClientMessage, ServerMessage, ToolResult } from "./protocol";
-import { appendOnce, upsertMessage } from "./transcript";
+import { appendOnce, dropEmpty, upsertMessage } from "./transcript";
 
 export interface ChatMessage {
   id: string;
@@ -41,9 +41,15 @@ export function useChat({ send, editorRef }: Options) {
 
   // endStream closes off the current assistant message so the next delta starts
   // a new one. Every place that ends a message must reset BOTH refs.
+  //
+  // It also drops the message if it ended up with nothing in it: a drawing turn
+  // typically streams a bare "\n" before its tool calls, which would otherwise
+  // leave an empty bubble in the transcript.
   const endStream = () => {
+    const id = activeId.current;
     activeId.current = null;
     streamText.current = "";
+    if (id !== null) setMessages((prev) => dropEmpty(prev, id));
   };
 
   const handleServerMessage = useCallback(
@@ -142,7 +148,9 @@ export function useChat({ send, editorRef }: Options) {
       // The id is minted outside the updater: React may invoke it twice, and
       // messageId() inside would append the same message under two ids.
       const id = messageId();
-      setMessages((prev) => appendOnce(prev, { id, role: "user", text: trimmed }));
+      setMessages((prev) =>
+        appendOnce(prev, { id, role: "user", text: trimmed }),
+      );
     },
     [send, streaming, editorRef],
   );
