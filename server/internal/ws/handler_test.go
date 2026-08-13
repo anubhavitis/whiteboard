@@ -805,3 +805,31 @@ func TestNoSkillStoreStillWorks(t *testing.T) {
 		t.Errorf("session broken after set_skills with no store: %q", got)
 	}
 }
+
+// Go marshals a nil slice as JSON null, and the browser then threw on
+// null.length — which crashed the skills panel, the chat panel and the whole
+// page. The Go tests could not see it because []string(nil) and []string{} are
+// equal in Go; only the JSON differs. So assert the JSON.
+func TestSkillsStateNeverSendsNullArrays(t *testing.T) {
+	h, _, _ := skillHandler(t)
+	conn, done := dialTest(t, h)
+	defer done()
+
+	env := readUntil(t, conn, TypeSkillsState)
+	raw := string(env.Payload)
+	if strings.Contains(raw, `"enabled":null`) {
+		t.Errorf("enabled is null; the browser cannot read .length off it: %s", raw)
+	}
+	if strings.Contains(raw, `"skills":null`) {
+		t.Errorf("skills is null: %s", raw)
+	}
+
+	// And decoding into a map must give real arrays, not nil.
+	var got map[string]any
+	if err := json.Unmarshal(env.Payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["enabled"].([]any); !ok {
+		t.Errorf("enabled decoded as %T, want an array", got["enabled"])
+	}
+}

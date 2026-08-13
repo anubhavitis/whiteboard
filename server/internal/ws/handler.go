@@ -526,9 +526,15 @@ func (h *Handler) sendSkills(ctx context.Context, s *session) error {
 			Body:        sk.Body,
 		})
 	}
+	// A nil slice marshals to JSON null, and null.length throws in the browser —
+	// which crashed the whole panel. Always send an array.
+	enabled := s.skills()
+	if enabled == nil {
+		enabled = []string{}
+	}
 	return s.sendTyped(ctx, TypeSkillsState, SkillsState{
 		Skills:  infos,
-		Enabled: s.skills(),
+		Enabled: enabled,
 		// ~4 chars per token, the same rule the frontend uses for the canvas.
 		PromptTokens: (len(h.promptFor(s)) + 3) / 4,
 		CanvasBudget: 8000,

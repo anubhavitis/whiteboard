@@ -47,8 +47,15 @@ export function SkillsPanel({
   const [draftName, setDraftName] = useState("");
   const [draftBody, setDraftBody] = useState("");
 
-  const enabled = new Set(skills.enabled);
-  const share = Math.round((skills.prompt_tokens / skills.canvas_budget) * 100);
+  // Defensive: Go marshals a nil slice as JSON null, and reading .length off it
+  // threw here — crashing this component, ChatPanel and the whole page with it.
+  // The server sends [] now; this keeps a blank page from ever being the failure
+  // mode again.
+  const enabledIDs = skills.enabled ?? [];
+  const allSkills = skills.skills ?? [];
+  const enabled = new Set(enabledIDs);
+  const budget = skills.canvas_budget || 8000;
+  const share = Math.round(((skills.prompt_tokens ?? 0) / budget) * 100);
 
   function toggle(id: string) {
     const next = new Set(enabled);
@@ -64,7 +71,7 @@ export function SkillsPanel({
   }
 
   function startEdit(id: string) {
-    const skill = skills.skills.find((s) => s.id === id);
+    const skill = (skills.skills ?? []).find((s) => s.id === id);
     if (!skill) return;
     setEditing(id);
     setDraftName(skill.name);
@@ -128,7 +135,7 @@ export function SkillsPanel({
       >
         <span>Skills</span>
         <span className="skills__count">
-          {skills.enabled.length > 0 ? `${skills.enabled.length} on` : "none"}
+          {enabledIDs.length > 0 ? `${enabledIDs.length} on` : "none"}
           <span className="skills__chevron">{open ? "▾" : "▸"}</span>
         </span>
       </button>
@@ -139,7 +146,7 @@ export function SkillsPanel({
             Canvas reading and drawing rules always apply. These add to them.
           </p>
 
-          {skills.skills.map((skill) => (
+          {allSkills.map((skill) => (
             <label
               key={skill.id}
               className={`skills__item${disabled ? " skills__item--disabled" : ""}`}
@@ -187,7 +194,7 @@ export function SkillsPanel({
               className="skills__hint"
               title="Every enabled skill is sent again on each turn, competing with the canvas for context."
             >
-              prompt ~{skills.prompt_tokens} tok · {share}% of the canvas budget
+              prompt ~{skills.prompt_tokens ?? 0} tok · {share}% of the canvas budget
             </span>
             <button className="skills__link" onClick={startNew}>
               + New skill
