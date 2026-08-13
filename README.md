@@ -3,12 +3,15 @@
 A local-first AI thinking partner on an infinite canvas. Chat and canvas share one brain: the agent
 can read what you've drawn and draw back.
 
-**Stack:** React + tldraw · Go (session hub, MCP server) · SQLite · two interchangeable agents: a Claude Code subprocess (no API key) and a local MLX/Qwen3 model
+**Stack:** React + tldraw · Go (session hub, MCP server) · two interchangeable agents: a Claude Code subprocess (no API key) and a local MLX/Qwen3 model
+
+Canvas state lives in the browser's tldraw store and persists there; the server keeps no database.
 
 ## Status
 
-Phases 0–2 of the build plan complete and verified end to end. The agent reads the canvas and draws on
-it: adds shapes, connects them with arrows, relabels, deletes. Agent-drawn shapes are violet so you
+Phases 0–2 of the build plan complete and verified end to end, plus the native tool loop (§3.6) and a
+per-session skills picker (§1.2). Either agent reads the canvas and draws on it: adds shapes, connects
+them with arrows, relabels, deletes. Agent-drawn shapes are violet so you
 can tell who drew what.
 
 **No API key needed, either way.** Claude Code runs as a `claude -p` subprocess authenticated by your
@@ -25,7 +28,8 @@ agent  : create_shape {"shape":"box","text":"Postgres","near":"shape:api","direc
          "…one thing worth noting: a gateway talking straight to a database is unusual."
 ```
 
-Note it never emits coordinates — placement is relative, and the frontend computes pixels.
+Note it never emits coordinates — placement is relative, and the frontend computes pixels. Shapes are
+`box`, `ellipse`, `diamond` (a decision point) or `text`.
 
 ## How a turn flows
 
@@ -93,7 +97,8 @@ make dev
 
 Frontend on http://localhost:5173, server on http://localhost:8787. The canvas fills the window with
 the chat panel docked right; a dot in the panel header shows the agent connection — amber connecting,
-green connected, red disconnected.
+green connected, red disconnected. The grid is on by default (tldraw treats that as temporary state, so
+turning it off lasts until the next reload).
 
 ### Running against a local model
 
@@ -108,6 +113,32 @@ WHITEBOARD_AGENT=local make dev
 It reads the canvas **and draws on it**, same as Claude Code — free, private, and roughly 1–7s per
 turn depending on how much it draws.
 
+## Skills
+
+What an agent knows about the canvas is a markdown file, not a string in the code:
+`server/internal/agent/canvas_skill.md`. Both agents get it identically — Claude Code via
+`--append-system-prompt`, the local model as a system message — so the two can never drift.
+
+On top of that, the chat panel has a **Skills** row where you can switch optional skills on and off,
+and write your own. Two built-ins ship in the binary (flow-chart conventions, system-design
+diagrams). Your own live in `./skills/*.md` and are **gitignored**: they are your notes on how you
+want your agent to behave, not project source, so they never arrive in anyone else's clone. Dropping
+a `.md` file in there by hand works exactly as well as using the UI.
+
+The core canvas skill is deliberately absent from the picker. Its rules are the ones the code
+enforces — never emit coordinates, ids are not names, never claim an edit that did not happen — so an
+agent without it does not read as "fewer skills", it reads as broken.
+
+Two things worth knowing:
+
+- **Changing skills restarts the agent.** A system prompt is fixed when a session starts, so there is
+  no other way to apply one. That means a fresh thread, the same trade-off as switching agents, and
+  the picker is disabled mid-turn for the same reason.
+- **Every enabled skill is resent on every turn** and competes with the canvas for context. The panel
+  shows the running cost — the core skill is ~1,440 tokens and each extra one ~250, against a canvas
+  budget of 8,000 — because a slow, vaguer agent is the symptom of overloading it, and that is worth
+  seeing rather than guessing at.
+
 ## Layout
 
 | Path | What |
@@ -116,9 +147,12 @@ turn depending on how much it draws.
 | `server/` | Go. Owns the model loop and the WebSocket session. |
 | `spikes/` | Feasibility spikes + `FINDINGS.md`; re-run after a `claude` or `mlx-lm` upgrade. |
 | `docs/turn-flow.svg` | The dataflow diagram above, hand-authored. Edit it when the protocol changes. |
+| `server/internal/agent/canvas_skill.md` | How every agent reads and draws on the canvas. Always applied. |
+| `server/internal/agent/skills/` | Built-in optional skills, embedded in the binary. |
+| `skills/` | Your own skills. Gitignored — they never leave your machine. |
 
-The build plan (`planv2.md`) and the decision log (`DECISIONS.md`, D1–D7) are kept local and are not
-published here; references to `D2`/`D5`/`planv2 §4.2` below point at those.
+The build plan (`planv2.md`) and the decision log (`DECISIONS.md`, D1–D9) are kept local and are not
+published here; references to `D2`/`D5`/`D8`/`D9` and `planv2` sections point at those.
 
 ## Configuration
 
@@ -130,6 +164,7 @@ published here; references to `D2`/`D5`/`planv2 §4.2` below point at those.
 | `WHITEBOARD_AGENT` | autodetect | server — `local`, `echo`, or `claude` |
 | `WHITEBOARD_LOCAL_BASE_URL` | `http://127.0.0.1:8080/v1` | server — OpenAI-compatible endpoint |
 | `WHITEBOARD_LOCAL_MODEL` | `…Qwen3-30B-A3B-Instruct-2507-8bit` | server — must be a real HF repo id, not an alias |
+| `WHITEBOARD_SKILLS_DIR` | `skills` | server — where your own skills are read and written |
 | `VITE_WS_URL` | `ws://localhost:8787/ws` | web |
 
 Claude Code needs the `claude` CLI on PATH and logged in. The local agent needs `mlx_lm.server`
@@ -143,7 +178,14 @@ running. Neither needs an API key.
 - **Usage is shared with your normal Claude Code work** — same subscription window. Config isolation
   keeps a turn ~6x cheaper than the naive setup; see `spikes/FINDINGS.md`.
 - **The `claude` CLI is a moving dependency.** After upgrading it, re-run the spikes in `spikes/`
-  before trusting sessions (planv2 §5.5). Verified against 2.1.226.
+  before trusting sessions (planv2 §5.5). Verified against 2.1.228.
+- **`mlx-lm` is one too.** The tool-call format it emits is version-specific: 0.31.3 sends each call
+  whole in one SSE frame rather than fragmenting arguments the way the OpenAI API does. The parser
+  handles both, but re-run `spikes/s3` after upgrading.
+- **The local model plans shallowly.** It is reliable at one to four calls — add, connect, relabel,
+  delete, "what's missing" — and weaker when asked to restructure an existing diagram. It also guesses
+  shape ids on its first attempt and burns two or three rejected arrows correcting itself, which costs
+  a couple of seconds. Claude Code is the better choice for "re-architect this".
 
 ## Licensing note
 
