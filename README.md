@@ -7,7 +7,10 @@ reads what you've drawn and draws back.
 subprocess (no API key) and a local MLX/Qwen3 model. Canvas state lives in the browser's tldraw store.
 
 <p align="center">
-  <img src="docs/turn-flow.svg" alt="A turn flows from the browser to ws/handler, out to whichever agent is running, and back to ws/executor, which asks the browser to execute each canvas tool. Claude Code returns tool calls over MCP; the local MLX model has them parsed out of its stream." width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/turn-flow-dark.svg">
+    <img src="docs/turn-flow-light.svg" alt="A turn flows from the browser to ws/handler, out to whichever agent is running, and back to ws/executor, which asks the browser to execute each canvas tool. Claude Code returns tool calls over MCP; the local MLX model has them parsed out of its stream." width="100%">
+  </picture>
 </p>
 
 Either agent reads the canvas and draws on it: adds shapes, connects them with arrows, relabels,

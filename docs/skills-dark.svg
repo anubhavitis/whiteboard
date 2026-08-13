@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="430" viewBox="0 0 1000 430" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>How a system prompt is composed, and what it costs against the canvas budget</title>
+
+  <!-- No background rect. Same palette as the other diagrams in docs/. -->
+
+  <defs>
+    <marker id="k-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b5cf6"/>
+    </marker>
+  </defs>
+
+  <!-- ============ sources ============ -->
+  <text x="30" y="32" font-size="12" font-weight="600" fill="#8899ad">where the text comes from</text>
+
+  <g stroke-width="1.5">
+    <rect x="30" y="46" width="250" height="52" rx="6" fill="#7c3aed26" stroke="#8b5cf6"/>
+    <rect x="30" y="112" width="250" height="52" rx="6" fill="#6366f120" stroke="#7c8cf8"/>
+    <rect x="30" y="178" width="250" height="52" rx="6" fill="#6366f120" stroke="#7c8cf8"/>
+  </g>
+
+  <g font-size="11.5" fill="#c9d3e0"
+     font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <text x="46" y="68">canvas_skill.md</text>
+    <text x="46" y="134">skills/*.md  (embedded)</text>
+    <text x="46" y="200">./skills/*.md</text>
+  </g>
+  <g font-size="10" fill="#8899ad">
+    <text x="46" y="86">always applied · not selectable</text>
+    <text x="46" y="152">built in · shipped in the binary</text>
+    <text x="46" y="218">yours · gitignored, never pushed</text>
+  </g>
+
+  <!-- lock marker on the core -->
+  <text x="262" y="70" font-size="13" fill="#8b5cf6">🔒</text>
+
+  <!-- ============ composition ============ -->
+  <g stroke="#8b5cf6" stroke-width="1.75" fill="none" marker-end="url(#k-violet)">
+    <path d="M280,72 L360,72 L360,150 L406,150"/>
+  </g>
+  <g stroke="#7c8cf8" stroke-width="1.6" fill="none" marker-end="url(#k-violet)">
+    <path d="M280,138 L406,144"/>
+    <path d="M280,204 L360,204 L360,158 L406,156"/>
+  </g>
+
+  <g stroke-width="1.5">
+    <rect x="406" y="120" width="188" height="60" rx="6" fill="#7c3aed26" stroke="#8b5cf6"/>
+  </g>
+  <text x="500" y="144" text-anchor="middle" font-size="12" fill="#c9d3e0"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace">ComposePrompt</text>
+  <text x="500" y="162" text-anchor="middle" font-size="10" fill="#8899ad">core + whatever is ticked</text>
+
+  <text x="500" y="200" text-anchor="middle" font-size="10" fill="#8899ad">only the ticked ones are</text>
+  <text x="500" y="213" text-anchor="middle" font-size="10" fill="#8899ad">included; core always is</text>
+
+  <!-- ============ both agents ============ -->
+  <g stroke="#8b5cf6" stroke-width="1.75" fill="none" marker-end="url(#k-violet)">
+    <path d="M594,138 L700,110"/>
+    <path d="M594,162 L700,190"/>
+  </g>
+
+  <g stroke-width="1.5">
+    <rect x="700" y="82" width="270" height="52" rx="6" fill="#6366f120" stroke="#7c8cf8"/>
+    <rect x="700" y="164" width="270" height="52" rx="6" fill="#6366f120" stroke="#7c8cf8"/>
+  </g>
+  <g font-size="11.5" fill="#c9d3e0"
+     font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <text x="716" y="104">claude -p</text>
+    <text x="716" y="186">mlx_lm.server</text>
+  </g>
+  <g font-size="10" fill="#8899ad">
+    <text x="716" y="122">--append-system-prompt</text>
+    <text x="716" y="204">system message</text>
+  </g>
+  <text x="835" y="150" text-anchor="middle" font-size="10" fill="#8b5cf6">the same string, so the two cannot drift</text>
+
+  <!-- ============ the cost ============ -->
+  <line x1="30" y1="262" x2="970" y2="262" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 5"/>
+  <text x="30" y="286" font-size="12" font-weight="600" fill="#8899ad">
+    what one turn spends, before the canvas is even included
+  </text>
+
+  <!-- budget bar: 8000 tokens wide across 900px -->
+  <g stroke-width="1">
+    <rect x="30" y="300" width="900" height="34" rx="4" fill="#94a3b810" stroke="#94a3b8"/>
+  </g>
+  <!-- core ~1440/8000 = 18% -> 162px -->
+  <rect x="30" y="300" width="162" height="34" rx="4" fill="#8b5cf640" stroke="#8b5cf6" stroke-width="1"/>
+  <!-- schemas ~635/8000 = 8% -> 71px -->
+  <rect x="192" y="300" width="71" height="34" fill="#7c8cf840" stroke="#7c8cf8" stroke-width="1"/>
+  <!-- one skill ~256 -> 29px -->
+  <rect x="263" y="300" width="29" height="34" fill="#94a3b830" stroke="#94a3b8" stroke-width="1"/>
+
+  <g font-size="10" fill="#8899ad">
+    <text x="36" y="352">core skill</text>
+    <text x="198" y="352">tool schemas</text>
+    <text x="269" y="366">one extra skill</text>
+    <text x="700" y="352" text-anchor="middle">what is left for your canvas</text>
+  </g>
+  <line x1="292" y1="338" x2="292" y2="360" stroke="#94a3b8" stroke-width="1"/>
+
+  <text x="930" y="352" text-anchor="end" font-size="10" fill="#8899ad">MAX_CONTEXT_TOKENS</text>
+
+  <text x="30" y="392" font-size="10.5" fill="#8b5cf6">
+    Every enabled skill is resent on every turn. Tick four and the canvas loses roughly a third of its room —
+  </text>
+  <text x="30" y="408" font-size="10.5" fill="#8b5cf6">
+    which shows up as vaguer answers, not as an error. The panel displays the running total for that reason.
+  </text>
+</svg>

@@ -13,7 +13,10 @@ the identifier that holds it.
 sides of the process boundary**:
 
 <p align="center">
-  <img src="agent-seam.svg" alt="Above the AgentSession line, ws/handler and ws/executor know nothing about models. Below it, Claude Code runs its loop inside a subprocess and pushes tool calls back over MCP, while the native agent's loop runs in Go and pulls tool calls out of the model's stream." width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="agent-seam-dark.svg">
+    <img src="agent-seam-light.svg" alt="Above the AgentSession line, ws/handler and ws/executor know nothing about models. Below it, Claude Code runs its loop inside a subprocess and pushes tool calls back over MCP, while the native agent's loop runs in Go and pulls tool calls out of the model's stream." width="100%">
+  </picture>
 </p>
 
 | | Claude Code | MLX / Qwen3 |

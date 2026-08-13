@@ -8,7 +8,10 @@ figures that go stale.
 ## Skills
 
 <p align="center">
-  <img src="skills.svg" alt="The core canvas skill plus any ticked optional skills are composed into one system prompt, given identically to both agents. A budget bar shows the core skill and tool schemas consuming part of the canvas token budget before the canvas is included." width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="skills-dark.svg">
+    <img src="skills-light.svg" alt="The core canvas skill plus any ticked optional skills are composed into one system prompt, given identically to both agents. A budget bar shows the core skill and tool schemas consuming part of the canvas token budget before the canvas is included." width="100%">
+  </picture>
 </p>
 
 What an agent knows about the canvas is markdown, not a Go string:
@@ -43,7 +46,10 @@ selection into every other tab.
 ## The model always guesses a new shape's id
 
 <p align="center">
-  <img src="tool-loop.svg" alt="One drawing turn: the model emits create_shape and create_arrow together, the arrow references an invented id and is rejected, the rejection tells the model the real id, and the retry succeeds." width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="tool-loop-dark.svg">
+    <img src="tool-loop-light.svg" alt="One drawing turn: the model emits create_shape and create_arrow together, the arrow references an invented id and is rejected, the rejection tells the model the real id, and the retry succeeds." width="100%">
+  </picture>
 </p>
 
 Measured on every drawing run, with both agents: asked to add a shape and connect

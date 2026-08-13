@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>One drawing turn: the id the model guesses, the rejection, and the retry</title>
+
+  <!-- No background rect. Same palette as the other diagrams in docs/, chosen to
+       hold contrast on both a near-white and a near-black page. -->
+
+  <defs>
+    <marker id="l-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6d28d9"/>
+    </marker>
+    <marker id="l-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="l-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/>
+    </marker>
+  </defs>
+
+  <!-- column headings -->
+  <g font-size="12" font-weight="600" fill="#475569" text-anchor="middle">
+    <text x="150" y="34">the model</text>
+    <text x="500" y="34">the loop (native/turn.go)</text>
+    <text x="850" y="34">the canvas</text>
+  </g>
+  <g stroke="#94a3b8" stroke-dasharray="4 5" stroke-width="1">
+    <line x1="300" y1="46" x2="300" y2="470"/>
+    <line x1="700" y1="46" x2="700" y2="470"/>
+  </g>
+
+  <!-- ===== step 1: both calls in one response ===== -->
+  <g stroke-width="1.5">
+    <rect x="30" y="62" width="240" height="66" rx="6" fill="#6366f120" stroke="#6366f1"/>
+  </g>
+  <text x="150" y="84" text-anchor="middle" font-size="11.5" fill="#1f2937">one response, two calls</text>
+  <g font-size="10.5" fill="#475569" text-anchor="middle"
+     font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <text x="150" y="102">create_shape "Postgres"</text>
+    <text x="150" y="118">create_arrow → shape:pg1</text>
+  </g>
+  <text x="150" y="146" text-anchor="middle" font-size="10" fill="#b91c1c">shape:pg1 is invented — it cannot know the real id yet</text>
+
+  <!-- ===== step 2: shape succeeds ===== -->
+  <g stroke="#7c3aed" stroke-width="1.75" fill="none" marker-end="url(#l-violet)">
+    <path d="M270,95 L420,95"/>
+  </g>
+  <g stroke-width="1.5">
+    <rect x="420" y="72" width="160" height="46" rx="6" fill="#7c3aed20" stroke="#7c3aed"/>
+  </g>
+  <text x="500" y="100" text-anchor="middle" font-size="12" fill="#1f2937"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace">create_shape</text>
+
+  <g stroke="#7c3aed" stroke-width="1.75" fill="none" marker-end="url(#l-violet)">
+    <path d="M580,95 L740,95"/>
+  </g>
+  <g stroke-width="1.5">
+    <rect x="740" y="72" width="200" height="46" rx="6" fill="#7c3aed20" stroke="#7c3aed"/>
+  </g>
+  <text x="840" y="94" text-anchor="middle" font-size="11" fill="#1f2937">drawn</text>
+  <text x="840" y="110" text-anchor="middle" font-size="10.5" fill="#6d28d9"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace">id = shape:HAxxVP1i</text>
+
+  <!-- result travels back -->
+  <g stroke="#64748b" stroke-width="1.6" fill="none" marker-end="url(#l-grey)">
+    <path d="M740,130 L620,130 L620,150 L580,150"/>
+  </g>
+  <text x="700" y="146" text-anchor="middle" font-size="10" fill="#475569">the real id comes back</text>
+
+  <!-- ===== step 3: arrow rejected ===== -->
+  <g stroke="#dc2626" stroke-width="1.75" fill="none" marker-end="url(#l-red)">
+    <path d="M270,196 L420,196"/>
+  </g>
+  <g stroke-width="1.5">
+    <rect x="420" y="173" width="160" height="46" rx="6" fill="#e0796f1f" stroke="#dc2626"/>
+  </g>
+  <text x="500" y="201" text-anchor="middle" font-size="12" fill="#1f2937"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace">create_arrow</text>
+
+  <g stroke="#dc2626" stroke-width="1.75" fill="none" marker-end="url(#l-red)">
+    <path d="M580,196 L740,196"/>
+  </g>
+  <g stroke-width="1.5">
+    <rect x="740" y="173" width="200" height="46" rx="6" fill="#e0796f1f" stroke="#dc2626"/>
+  </g>
+  <text x="840" y="195" text-anchor="middle" font-size="11" fill="#1f2937">rejected</text>
+  <text x="840" y="211" text-anchor="middle" font-size="10" fill="#b91c1c">no shape with id shape:pg1</text>
+
+  <!-- the error that teaches -->
+  <g stroke="#dc2626" stroke-width="1.6" fill="none" marker-end="url(#l-red)">
+    <path d="M740,232 L340,232 L340,252 L270,252"/>
+  </g>
+  <g stroke-width="1.5">
+    <rect x="350" y="242" width="330" height="62" rx="6" fill="#94a3b818" stroke="#94a3b8"/>
+  </g>
+  <text x="515" y="262" text-anchor="middle" font-size="10.5" fill="#1f2937">the rejection carries the fix</text>
+  <g font-size="10" fill="#475569" text-anchor="middle">
+    <text x="515" y="278">shapes you created this turn:</text>
+    <text x="515" y="292">"Postgres" → shape:HAxxVP1i · do not create it again</text>
+  </g>
+
+  <!-- ===== step 4: retry succeeds ===== -->
+  <g stroke-width="1.5">
+    <rect x="30" y="322" width="240" height="60" rx="6" fill="#6366f120" stroke="#6366f1"/>
+  </g>
+  <text x="150" y="344" text-anchor="middle" font-size="11.5" fill="#1f2937">second response</text>
+  <text x="150" y="364" text-anchor="middle" font-size="10.5" fill="#475569"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace">create_arrow → shape:HAxxVP1i</text>
+
+  <g stroke="#7c3aed" stroke-width="1.75" fill="none" marker-end="url(#l-violet)">
+    <path d="M270,352 L420,352"/>
+  </g>
+  <g stroke-width="1.5">
+    <rect x="420" y="329" width="160" height="46" rx="6" fill="#7c3aed20" stroke="#7c3aed"/>
+  </g>
+  <text x="500" y="357" text-anchor="middle" font-size="12" fill="#1f2937"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace">create_arrow</text>
+
+  <g stroke="#7c3aed" stroke-width="1.75" fill="none" marker-end="url(#l-violet)">
+    <path d="M580,352 L740,352"/>
+  </g>
+  <g stroke-width="1.5">
+    <rect x="740" y="329" width="200" height="46" rx="6" fill="#7c3aed20" stroke="#7c3aed"/>
+  </g>
+  <text x="840" y="357" text-anchor="middle" font-size="11" fill="#1f2937">connected</text>
+
+  <!-- ===== the guards ===== -->
+  <line x1="30" y1="412" x2="960" y2="412" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 5"/>
+  <text x="30" y="436" font-size="11" font-weight="600" fill="#475569">
+    every call also passes the loop's guards, each added because the model did the thing:
+  </text>
+  <g font-size="10.5" fill="#475569">
+    <text x="30" y="456">· self-loop refused</text>
+    <text x="200" y="456">· same call 3× broken</text>
+    <text x="380" y="456">· x/y stripped</text>
+    <text x="510" y="456">· unknown tool caught in Go</text>
+    <text x="730" y="456">· claimed-but-unmade edit challenged</text>
+  </g>
+  <text x="30" y="476" font-size="10.5" fill="#6d28d9">
+    the whole turn is capped by agent.MaxToolCallsPerTurn; each browser round trip by ws.toolTimeout
+  </text>
+</svg>

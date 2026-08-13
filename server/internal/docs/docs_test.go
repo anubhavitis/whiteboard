@@ -305,51 +305,74 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
-// Diagrams must work on a light page and a dark one. The first version of
-// turn-flow.svg painted an opaque white background, which read as a glaring slab in
-// dark mode and clashed with GitHub's off-white in light mode.
+// Every diagram must ship a -light and a -dark variant, and be embedded through a
+// <picture> element.
 //
-// The rule: no background fill, and no colour so light or so dark that it
-// disappears against one theme. Rather than police every hex value, this checks the
-// two mistakes that actually happened.
-func TestDiagramsAreThemeNeutral(t *testing.T) {
+// A single transparent SVG is not enough, which cost a round trip to learn: GitHub
+// renders <img src="*.svg"> against a white background of its own, so a file tuned
+// for dark mode appears as a white slab there no matter how transparent it is.
+// prefers-color-scheme inside the SVG does not help either — GitHub's img context
+// does not apply it. Two files selected by <picture> is the only mechanism that
+// works.
+func TestDiagramsShipBothThemeVariants(t *testing.T) {
 	root := repoRoot(t)
 	svgs, err := filepath.Glob(filepath.Join(root, "docs", "*.svg"))
 	if err != nil || len(svgs) == 0 {
 		t.Fatalf("no diagrams found: %v", err)
 	}
 
-	// Near-white and near-black fills disappear against one theme or the other.
-	// Listed as whole attribute values so a translucent "#ffffff20" is allowed.
-	banned := []string{
-		`fill="#ffffff"`, `fill="#fff"`, `fill="white"`,
-		`fill="#000000"`, `fill="#000"`, `fill="black"`,
-		`fill="#0f172a"`, `fill="#f8fafc"`, `fill="#eef2ff"`,
+	bases := map[string]bool{}
+	for _, p := range svgs {
+		n := strings.TrimSuffix(filepath.Base(p), ".svg")
+		n = strings.TrimSuffix(strings.TrimSuffix(n, "-light"), "-dark")
+		bases[n] = true
 	}
 
-	for _, path := range svgs {
-		b, err := os.ReadFile(path)
+	for base := range bases {
+		for _, suffix := range []string{"-light", "-dark"} {
+			want := filepath.Join(root, "docs", base+suffix+".svg")
+			if _, err := os.Stat(want); err != nil {
+				t.Errorf("%s%s.svg is missing; both variants must exist", base, suffix)
+			}
+		}
+	}
+
+	// The dark variant must not carry a light background, and vice versa.
+	for _, p := range svgs {
+		b, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := string(b)
-		name := filepath.Base(path)
-
-		for _, bad := range banned {
-			if strings.Contains(body, bad) {
-				t.Errorf("%s uses %s, which vanishes or glares in one theme", name, bad)
-			}
-		}
-
-		// A full-canvas rect at the origin is a background, whatever its colour.
+		body, name := string(b), filepath.Base(p)
 		if regexp.MustCompile(`<rect x="0"\s+y="0"`).MatchString(body) {
-			t.Errorf("%s paints a full-canvas background rect; let the page show through", name)
+			t.Errorf("%s paints a full-canvas background rect; the theme variant handles that", name)
 		}
 	}
 }
 
-// A diagram is only useful if it is reachable. Every SVG in docs/ should be
-// embedded somewhere, or it is dead weight nobody will maintain.
+// A diagram embedded with a bare <img> shows the wrong variant in one theme. Every
+// embed must go through <picture> with a prefers-color-scheme source.
+func TestDiagramsAreEmbeddedViaPicture(t *testing.T) {
+	bareImg := regexp.MustCompile(`<img src="[^"]*\.svg"`)
+	for path, body := range trackedDocs(t) {
+		for _, m := range bareImg.FindAllString(body, -1) {
+			if !strings.Contains(m, "-light.svg") {
+				t.Errorf("%s embeds %s directly; use <picture> so dark mode gets its variant",
+					path, m)
+			}
+		}
+		// Each <picture> needs its dark source.
+		pics := strings.Count(body, "<picture>")
+		darks := strings.Count(body, "prefers-color-scheme: dark")
+		if pics != darks {
+			t.Errorf("%s has %d <picture> blocks but %d dark sources", path, pics, darks)
+		}
+	}
+}
+
+// A diagram is only useful if it is reachable. Every theme variant must be
+// embedded, and every base must be listed in the generator that produces those
+// variants — otherwise it is dead weight nobody will maintain.
 func TestEveryDiagramIsReferenced(t *testing.T) {
 	root := repoRoot(t)
 	svgs, _ := filepath.Glob(filepath.Join(root, "docs", "*.svg"))
@@ -358,10 +381,26 @@ func TestEveryDiagramIsReferenced(t *testing.T) {
 	for _, body := range trackedDocs(t) {
 		allDocs += body
 	}
+	gen, err := os.ReadFile(filepath.Join(root, "docs", "make-theme-variants.py"))
+	if err != nil {
+		t.Fatalf("the variant generator is missing: %v", err)
+	}
+
 	for _, path := range svgs {
 		name := filepath.Base(path)
-		if !strings.Contains(allDocs, name) {
-			t.Errorf("%s is not referenced by any doc; either embed it or delete it", name)
+		stem := strings.TrimSuffix(name, ".svg")
+
+		// Variants are embedded in the docs.
+		if strings.HasSuffix(stem, "-light") || strings.HasSuffix(stem, "-dark") {
+			if !strings.Contains(allDocs, name) {
+				t.Errorf("%s is not embedded by any doc; either use it or delete it", name)
+			}
+			continue
+		}
+		// A base file is the source the variants are generated from, so it belongs
+		// to the generator rather than to a doc.
+		if !strings.Contains(string(gen), `"`+stem+`"`) {
+			t.Errorf("%s is neither embedded nor listed in make-theme-variants.py", name)
 		}
 	}
 }
